@@ -12,7 +12,8 @@
             "mode": "auto",
             "program": "${workspaceFolder}",
             "env": {
-                "PATH": "/home/berg/.local/share/pnpm:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/home/berg/go/bin:/usr/local/go/bin:/home/berg/go/bin:/usr/local/go/bin"
+                //Needed due to running as root
+                "PATH": "/home/berg/.local/share/pnpm:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/home/berg/go/bin:/usr/local/go/bin:/home/berg/go/bin:/usr/local/go/bin:/lib/llvm-14/bin/"
             },
             "asRoot": true,
             "console": "integratedTerminal"

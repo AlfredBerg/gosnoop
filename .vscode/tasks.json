@@ -14,7 +14,12 @@
             "presentation": {
                 "reveal": "always"
             },
-            "group": "build"
+            "group": "build",
+            "options": {
+                "env": {
+                    "PATH": "/home/berg/.local/share/pnpm:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/home/berg/go/bin:/usr/local/go/bin:/home/berg/go/bin:/usr/local/go/bin:/lib/llvm-14/bin/"
+                }
+            }
         }
     ]
 }
