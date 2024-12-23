@@ -5,7 +5,8 @@
 #include <linux/ptrace.h>
 #include <linux/types.h>
 
-#define BUF_SIZE 254
+#define BUF_SIZE 256
+#define MAX_ARGS 15
 
 typedef unsigned int uint32_t;
 
@@ -13,7 +14,11 @@ struct event
 {
     __u32 pid;
     __u8 path[BUF_SIZE];
+    __u8 argv[MAX_ARGS][BUF_SIZE];
 };
+
+// Needed to not have event be optmized away
+struct event *unused __attribute__((unused));
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -46,8 +51,18 @@ int trace_execve(struct exec_ctx *ctx)
 
     bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
 
-    bpf_printk("Program Pathname: %s", event->path);
+    for (int i = 0; i < MAX_ARGS; i++) 
+    {
+        const char *argp = NULL;
 
+        bpf_probe_read_user(&argp, sizeof(argp), &ctx->argv[i]);
+
+        if (!argp)
+            break;
+
+        bpf_probe_read_user_str(event->argv[i], sizeof(event->argv[i]), argp);
+    }
+    
     bpf_ringbuf_submit(event, 0);
 
     return 0;
