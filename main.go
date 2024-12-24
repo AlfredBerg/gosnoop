@@ -62,10 +62,10 @@ func main() {
 			continue
 		}
 
-		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.BigEndian, &event); err != nil {
+		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
 			log.Printf("parsing ringbuf event: %s", err)
 			continue
 		}
-		fmt.Printf("Got event: exec path %-64s args %-64s\n", event.Path, event.Argv)
+		fmt.Printf("Got event: comm %-64s, pid %-5d, exec path %-64s args %-64s\n", event.Command, event.Pid, event.Path, event.Argv)
 	}
 }
