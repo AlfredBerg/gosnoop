@@ -6,7 +6,8 @@
             "command": "go",
             "type": "shell",
             "args": [
-                "generate"
+                "generate",
+                "./..."
             ],
             "problemMatcher": [
                 "$tsc"

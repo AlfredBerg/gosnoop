@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"gosnoop/internal/ebpf/exec"
+	"gosnoop/internal/ebpf/file"
 	"log"
 	"os"
 	"os/signal"
@@ -20,7 +20,13 @@ func main() {
 		log.Fatal("failed emoving memlock, do you have root priveledges? err: ", err)
 	}
 
-	e := exec.Exec{}
+	// e := exec.Exec{}
+	// eventChan, err := e.ReceiveEvents()
+	// if err != nil {
+	// 	log.Fatal("failed receiving exec events: ", err)
+	// }
+
+	e := file.File{}
 	eventChan, err := e.ReceiveEvents()
 	if err != nil {
 		log.Fatal("failed receiving exec events: ", err)

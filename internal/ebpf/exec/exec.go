@@ -20,12 +20,12 @@ type ExecEvent struct {
 }
 
 func (r ExecEvent) String() string {
-	return fmt.Sprintf("Exec event from comm %s, pid %d: %s %s\n", r.comm, r.pid, r.path, strings.Join(r.argv, " "))
+	return fmt.Sprintf("Exec event from comm %s, pid %d: %s %s", r.comm, r.pid, r.path, strings.Join(r.argv, " "))
 }
 
 func convertExecEvent(e execEvent) ExecEvent {
 	o := ExecEvent{}
-	o.comm, _, _ = strings.Cut(string(e.Command[:]), "\x00")
+	o.comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
 	o.pid = int(e.Pid)
 
 	o.path, _, _ = strings.Cut(string(e.Path[:]), "\x00")
@@ -83,7 +83,7 @@ func (r *Exec) ReceiveEvents() (<-chan ExecEvent, error) {
 			record, err := r.rb.Read()
 			if err != nil {
 				if errors.Is(err, ringbuf.ErrClosed) {
-					log.Println("error received signal, exiting..")
+					log.Println("rungbufer closed, exiting..")
 					return
 				}
 				log.Printf("error reading from reader: %s", err)

@@ -13,7 +13,7 @@ typedef unsigned int uint32_t;
 struct event
 {
     __u32 pid;
-    __u8 command[BUF_SIZE];
+    __u8 comm[BUF_SIZE]; //name of process
 
     __u8 path[BUF_SIZE];
     __u8 argv[MAX_ARGS][BUF_SIZE];
@@ -75,7 +75,7 @@ int trace_execve(struct exec_ctx *ctx)
     }
 
     event->pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&event->command, sizeof(event->command));
+    bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
     bpf_ringbuf_submit(event, 0);
 
