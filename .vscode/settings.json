@@ -2,6 +2,8 @@
     "files.associations": {
         "bpf.h": "c",
         "bpf_helpers.h": "c",
-        "ptrace.h": "c"
+        "ptrace.h": "c",
+        "string.h": "c",
+        "bpf_endian.h": "c"
     }
 }

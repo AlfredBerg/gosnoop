@@ -13,7 +13,7 @@ typedef unsigned int uint32_t;
 struct event
 {
     __u32 pid;
-    __u8 comm[BUF_SIZE]; //name of process
+    __u8 comm[BUF_SIZE]; // name of process
 
     __u8 path[BUF_SIZE];
     __u8 argv[MAX_ARGS][BUF_SIZE];

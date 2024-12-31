@@ -171,6 +171,7 @@ struct openat_ctx
 };
 
 // TODO: The dfd file descriptor should be resolved in combination with filename as described here https://manpages.debian.org/unstable/manpages-dev/openat.2.en.html
+// might be possible to use for insipration https://github.com/iovisor/bcc/commit/c110a4dd0c8f8e15e3107f3a0807683a81657cbf#diff-7e530bfb3b516e09e3747909a2e21b8ae66651315b1930ee144a5a9f82e749a8R99
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_openat(struct openat_ctx *ctx)
 {
@@ -190,7 +191,8 @@ int trace_openat(struct openat_ctx *ctx)
     bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
 
     // Skip printing any path if only the fd is passed (until some good way to resolve it is found)
-    if (!event->path[0]){
+    if (!event->path[0])
+    {
         bpf_ringbuf_discard(event, 0);
         return 0;
     }
@@ -239,6 +241,13 @@ int trace_openat2(struct openat2_ctx *ctx)
     }
 
     bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
+
+    // Skip printing any path if only the fd is passed (until some good way to resolve it is found)
+    if (!event->path[0])
+    {
+        bpf_ringbuf_discard(event, 0);
+        return 0;
+    }
 
     const char syscall[] = "openat2";
     memcpy(&event->sysCall, syscall, sizeof(syscall));
