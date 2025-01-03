@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"gosnoop/internal/ebpf/dns"
+	"gosnoop/internal/ebpf/file"
 	"log"
 	"os"
 	"os/signal"
@@ -26,17 +26,17 @@ func main() {
 	// 	log.Fatal("failed receiving exec events: ", err)
 	// }
 
-	// e := file.File{}
-	// eventChan, err := e.ReceiveEvents()
-	// if err != nil {
-	// 	log.Fatal("failed receiving exec events: ", err)
-	// }
-
-	d := dns.Dns{}
-	eventChan, err := d.ReceiveEvents()
+	e := file.File{}
+	eventChan, err := e.ReceiveEvents()
 	if err != nil {
 		log.Fatal("failed receiving exec events: ", err)
 	}
+
+	// d := dns.Dns{}
+	// eventChan, err := d.ReceiveEvents()
+	// if err != nil {
+	// 	log.Fatal("failed receiving exec events: ", err)
+	// }
 
 	go func() {
 		<-stopper

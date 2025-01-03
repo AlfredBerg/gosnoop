@@ -1,11 +1,8 @@
-#include <linux/bpf.h>
+#include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
-#include <linux/if_ether.h>
-#include <linux/ip.h>
-#include <linux/udp.h>
-#include <linux/ptrace.h>
 #include <string.h>
+
 
 #define DNS_PORT 53
 #define IPPROTO_UDP 17 // Define IPPROTO_UDP if not available
