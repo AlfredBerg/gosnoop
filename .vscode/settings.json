@@ -13,6 +13,7 @@
         "stddef.h": "c",
         "if_ether.h": "c",
         "socket.h": "c",
-        "vmlinux.h": "c"
+        "vmlinux.h": "c",
+        "bpf_tracing.h": "c"
     }
 }

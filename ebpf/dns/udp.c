@@ -1,111 +1,96 @@
 #include <vmlinux.h>
-#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
 #include <string.h>
 
-
 #define DNS_PORT 53
-#define IPPROTO_UDP 17 // Define IPPROTO_UDP if not available
+#define IPPROTO_UDP 17
 
-// Structure to send DNS data to userspace
+#define PAYLOAD_MAX 512
+
+// Struct to send DNS data and metadata to userspace
 struct event
 {
     __u32 pid;
-    __u8 request[513];
+
+    __u16 sport;
+    __u16 dport;
+    __u32 saddr;
+    __u32 daddr;
+    __u32 ifindex;
+
+    __u8 comm[64];
+
+    __u16 pkt_len;
+    __u8 pkt_data[PAYLOAD_MAX];
 };
 
 // Needed to not have event struct be optmized away
 struct event *unused __attribute__((unused));
 
-// Ring buffer map for userspace communication
+// Ring buffer for kernel -> userspace communication
 struct
 {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 12); // 4KB buffer size
+    __uint(max_entries, 1 << 12);
 } ring_buffer SEC(".maps");
 
-SEC("xdp")
-int dns_monitor(struct xdp_md *ctx)
+//TODO: Does ipv6 work?
+SEC("kprobe/udp_sendmsg")
+int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t len)
 {
-    void *data = (void *)(long)ctx->data;
-    void *data_end = (void *)(long)ctx->data_end;
+    if (!sk)
+        return 0;
 
-    struct ethhdr *eth = data;
-    if ((void *)(eth + 1) > data_end)
-    {
-        return XDP_PASS;
-    }
+    __u16 sport, dport;
+    BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+    BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
 
-    // Check if it's an IP packet
-    if (eth->h_proto != bpf_htons(ETH_P_IP))
-    {
-        return XDP_PASS;
-    }
+    if (bpf_ntohs(dport) != DNS_PORT)
+        return 0;
 
-    struct iphdr *iph = (struct iphdr *)(eth + 1);
-    if ((void *)(iph + 1) > data_end)
-    {
-        return XDP_PASS;
-    }
-
-    // Check if it's a UDP packet
-    if (iph->protocol != IPPROTO_UDP)
-    {
-        return XDP_PASS;
-    }
-
-    struct udphdr *udph = (struct udphdr *)((void *)iph + (iph->ihl * 4));
-    if ((void *)(udph + 1) > data_end)
-    {
-        return XDP_PASS;
-    }
-
-    bpf_printk("ingress if %d srcport: %d dest port %d", ctx->ingress_ifindex, bpf_ntohs(udph->source), bpf_ntohs(udph->dest));
-
-    // Check if the destination port is DNS (53)
-    if (udph->source != bpf_htons(DNS_PORT))
-    {
-        return XDP_PASS;
-    }
-    bpf_printk("got dns packet");
-
-    // DNS payload starts after UDP header
-    void *dns_payload = (void *)(udph + 1);
-    if (dns_payload >= data_end)
-    {
-        return XDP_PASS;
-    }
-
-    // Parse the DNS query
     struct event *event = bpf_ringbuf_reserve(&ring_buffer, sizeof(*event), 0);
     if (!event)
+        return 0;
+
+    if (msg)
     {
-        return XDP_PASS;
+        struct iovec *iov;
+        BPF_CORE_READ_INTO(&iov, msg, msg_iter.iov);
+        if (iov)
+        {
+            void *base;
+            size_t len;
+            BPF_CORE_READ_INTO(&base, iov, iov_base);
+            BPF_CORE_READ_INTO(&len, iov, iov_len);
+
+            if (base && len <= sizeof(event->pkt_data))
+            {
+                bpf_probe_read_user(event->pkt_data, len, base);
+                event->pkt_len = len;
+            }
+        }
     }
 
-    __builtin_memset(event, 0, sizeof(*event));
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    event->pid = pid_tgid >> 32;
 
-    // int cpyLen = sizeof(event->request);
-    // if (sizeof(dns_payload) < cpyLen){
-    //     cpyLen = sizeof(dns_payload);
-    // }
-    // Calculate the available length of the DNS payload
-    __u64 available_length = (void *)data_end - dns_payload;
+    bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
-    // Limit the copy length to the size of the request buffer
-    __u64 copy_length = available_length < sizeof(event->request) ? available_length : sizeof(event->request);
-    for (__u64 i = 0; i < copy_length; i++)
-    {
-        if (dns_payload + i >= data_end)
-            break;
-        event->request[i] = ((char *)dns_payload)[i];
-    }
+    event->sport = sport;
+    event->dport = dport;
+    BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
+    BPF_CORE_READ_INTO(&event->daddr, sk, __sk_common.skc_daddr);
+    BPF_CORE_READ_INTO(&event->ifindex, sk, __sk_common.skc_bound_dev_if);
+    event->saddr = bpf_htonl(event->saddr);
+    event->daddr = bpf_htonl(event->daddr);
+    event->sport = bpf_htons(event->sport);
+    event->dport = bpf_htons(event->dport);
 
-    bpf_printk("send dns to userspace");
-    // Send the event to userspace
     bpf_ringbuf_submit(event, 0);
-
-    return XDP_PASS;
+    return 0;
 }
 
 char _license[] SEC("license") = "Dual MIT/GPL";

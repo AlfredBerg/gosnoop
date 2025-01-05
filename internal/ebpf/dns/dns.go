@@ -2,35 +2,55 @@ package dns
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
-	"net"
+	"strings"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 type dnsdata struct {
-	comm    string
-	pid     int //TODO: This is the pid of the spawned process, would be usefull with the parent pid
-	request string
-	argv    []string
+	comm string
+	pid  int //TODO: This is the pid of the spawned process, would be usefull with the parent pid
+
+	sport   uint16
+	dport   uint16
+	saddr   uint32
+	daddr   uint32
+	ifindex uint32
+
+	dnsPkt *layers.DNS
 }
 
 func (r dnsdata) String() string {
-	return fmt.Sprintf("Dns event: %s", r.request)
+	sb := strings.Builder{}
+	sb.WriteString(fmt.Sprintf("DNS event from comm %s, pid %d: ", r.comm, r.pid))
+	if r.dnsPkt != nil {
+		for _, q := range r.dnsPkt.Questions {
+			sb.WriteString(fmt.Sprintf("%s %s", q.Name, q.Type))
+		}
+	} else {
+		sb.WriteString("empty or nil dns request")
+	}
+	return sb.String()
 }
 
 func convertdnsEvent(e dnsEvent) dnsdata {
 	o := dnsdata{}
-	// o.comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
-	// o.pid = int(e.Pid)
+	o.comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
+	o.pid = int(e.Pid)
 
-	rawDNS, _, _ := bytes.Cut(e.Request[:], []byte("\x00"))
-	o.request = base64.StdEncoding.EncodeToString(rawDNS)
+	var len int = int(e.PktLen)
+
+	dnsPacket := gopacket.NewPacket(e.PktData[:len], layers.LayerTypeDNS, gopacket.Default).ApplicationLayer()
+	if dnsPacket != nil {
+		o.dnsPkt = dnsPacket.(*layers.DNS)
+	}
 
 	return o
 }
@@ -61,19 +81,10 @@ func (r *Dns) ReceiveEvents() (<-chan dnsdata, error) {
 		log.Fatal("Loading eBPF objects:", err)
 	}
 
-	ifname := "enp42s0" // Change this to an interface on your machine. TODO: Get all interfaces
-	iface, err := net.InterfaceByName(ifname)
+	var err error
+	r.ifXDP, err = link.Kprobe("udp_sendmsg", r.objs.UdpSendmsgProbe, nil)
 	if err != nil {
-		log.Fatalf("Getting interface %s: %s", ifname, err)
-	}
-
-	// Attach to the network interface.
-	r.ifXDP, err = link.AttachXDP(link.XDPOptions{
-		Program:   r.objs.DnsMonitor,
-		Interface: iface.Index,
-	})
-	if err != nil {
-		log.Fatal("Attaching XDP:", err)
+		log.Fatalf("failed attatching kprobe: %s", err)
 	}
 
 	r.rb, err = ringbuf.NewReader(r.objs.RingBuffer)
