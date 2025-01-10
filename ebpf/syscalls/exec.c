@@ -15,6 +15,7 @@ struct event
 
     __u8 path[BUF_SIZE];
     __u8 argv[MAX_ARGS][BUF_SIZE];
+    __u8 envp[MAX_ARGS][BUF_SIZE];
 };
 
 // Needed to not have event struct be optmized away
@@ -70,6 +71,21 @@ int trace_execve(struct exec_ctx *ctx)
         }
 
         bpf_probe_read_user_str(event->argv[i], sizeof(event->argv[i]), argp);
+    }
+
+
+    for (int i = 0; i < MAX_ARGS; i++)
+    {
+        const char *env = NULL;
+
+        bpf_probe_read_user(&env, sizeof(env), &ctx->envp[i]);
+
+        if (!env)
+        {
+            break;
+        }
+
+        bpf_probe_read_user_str(event->envp[i], sizeof(event->envp[i]), env);
     }
 
     event->pid = bpf_get_current_pid_tgid();

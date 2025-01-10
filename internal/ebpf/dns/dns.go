@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"gosnoop/internal/event"
 	"log"
 	"strings"
 
@@ -14,10 +15,12 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-type dnsdata struct {
-	comm string
-	pid  int //TODO: This is the pid of the spawned process, would be usefull with the parent pid
+type question struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
 
+type dnsdata struct {
 	sport   uint16
 	dport   uint16
 	saddr   uint32
@@ -25,41 +28,55 @@ type dnsdata struct {
 	ifindex uint32
 
 	dnsPkt *layers.DNS
+	Q      []question `json:"q"`
 }
 
-func (r dnsdata) String() string {
-	sb := strings.Builder{}
-	sb.WriteString(fmt.Sprintf("DNS event from comm %s, pid %d: ", r.comm, r.pid))
-	if r.dnsPkt != nil {
-		for _, q := range r.dnsPkt.Questions {
-			sb.WriteString(fmt.Sprintf("%s %s", q.Name, q.Type))
-		}
-	} else {
-		sb.WriteString("empty or nil dns request")
-	}
-	return sb.String()
+type DnsEvent struct {
+	event.BaseEvent
+	Data dnsdata `json:"data"`
 }
 
-func convertdnsEvent(e dnsEvent) dnsdata {
-	o := dnsdata{}
-	o.comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
-	o.pid = int(e.Pid)
+// func (r dnsdata) String() string {
+// 	sb := strings.Builder{}
+// 	sb.WriteString(fmt.Sprintf("DNS event from comm %s, pid %d: ", r.comm, r.pid))
 
+// 	return sb.String()
+// }
+
+func convertdnsEvent(e dnsEvent) DnsEvent {
+
+	ev := DnsEvent{}
+	ev.ProcessInfo.Comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
+	ev.ProcessInfo.PID = int(e.Pid)
+
+	ev.Type = "dns"
+
+	d := dnsdata{}
 	var len int = int(e.PktLen)
 
-	dnsPacket := gopacket.NewPacket(e.PktData[:len], layers.LayerTypeDNS, gopacket.Default).ApplicationLayer()
-	if dnsPacket != nil {
-		o.dnsPkt = dnsPacket.(*layers.DNS)
-	}
+	gopkt := gopacket.NewPacket(e.PktData[:len], layers.LayerTypeDNS, gopacket.Default).ApplicationLayer()
+	if gopkt != nil {
+		dnsPkt, ok := gopkt.(*layers.DNS)
+		if !ok {
+			return ev
+		}
+		var qs []question
 
-	return o
+		for _, q := range dnsPkt.Questions {
+			qs = append(qs, question{string(q.Name), q.Type.String()})
+		}
+		d.Q = qs
+
+	}
+	ev.Data = d
+
+	return ev
 }
 
 type Dns struct {
-	events chan dnsdata
-	ifXDP  link.Link
-	rb     *ringbuf.Reader
-	objs   dnsObjects
+	ifXDP link.Link
+	rb    *ringbuf.Reader
+	objs  dnsObjects
 }
 
 func (r *Dns) Close() {
@@ -72,27 +89,24 @@ func (r *Dns) Close() {
 	if err := r.rb.Close(); err != nil {
 		log.Fatalf("failed closing ringbuf reader: %s", err)
 	}
-	close(r.events)
 }
 
-func (r *Dns) ReceiveEvents() (<-chan dnsdata, error) {
+func (r *Dns) ReceiveEvents(c chan<- interface{}) error {
 	// Load the compiled eBPF ELF and load it into the kernel.
 	if err := loadDnsObjects(&r.objs, nil); err != nil {
-		log.Fatal("Loading eBPF objects:", err)
+		return fmt.Errorf("loading eBPF objects: %w", err)
 	}
 
 	var err error
 	r.ifXDP, err = link.Kprobe("udp_sendmsg", r.objs.UdpSendmsgProbe, nil)
 	if err != nil {
-		log.Fatalf("failed attatching kprobe: %s", err)
+		return fmt.Errorf("failed attatching kprobe: %w", err)
 	}
 
 	r.rb, err = ringbuf.NewReader(r.objs.RingBuffer)
 	if err != nil {
-		log.Fatalf("opening ringbuf reader: %s", err)
+		return fmt.Errorf("opening ringbuf reader: %w", err)
 	}
-
-	r.events = make(chan dnsdata)
 
 	go func() {
 		var event dnsEvent
@@ -111,8 +125,8 @@ func (r *Dns) ReceiveEvents() (<-chan dnsdata, error) {
 				log.Printf("error parsing ringbuf event: %s", err)
 				continue
 			}
-			r.events <- convertdnsEvent(event)
+			c <- convertdnsEvent(event)
 		}
 	}()
-	return r.events, nil
+	return nil
 }

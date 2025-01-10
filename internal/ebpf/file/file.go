@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"gosnoop/internal/event"
 	"log"
 	"strings"
 
@@ -12,35 +13,41 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 )
 
+type fileData struct {
+	Syscall string `json:"syscall"`
+
+	Path string `json:"path"`
+}
+
 type FileEvent struct {
-	comm string
-	pid  int //TODO: This is the pid of the spawned process, would be usefull with the parent pid
+	event.BaseEvent
 
-	syscall string
-
-	path string
+	Data fileData `json:"data"`
 }
 
 func (r FileEvent) String() string {
-	return fmt.Sprintf("File event from comm %s, pid %d, syscall %s: %s", r.comm, r.pid, r.syscall, r.path)
+	return fmt.Sprintf("File event from comm %s, pid %d, syscall %s: %s", r.BaseEvent.ProcessInfo.Comm, r.BaseEvent.ProcessInfo.PID, r.Data.Syscall, r.Data.Path)
 }
 
 func convertExecEvent(e fileEvent) FileEvent {
-	o := FileEvent{}
-	o.comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
-	o.pid = int(e.Pid)
+	d := fileData{}
+	ev := FileEvent{}
 
-	o.path, _, _ = strings.Cut(string(e.Path[:]), "\x00")
+	ev.BaseEvent.ProcessInfo.Comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
+	ev.BaseEvent.ProcessInfo.PID = int(e.Pid)
 
-	o.syscall, _, _ = strings.Cut(string(e.SysCall[:]), "\x00")
+	d.Path, _, _ = strings.Cut(string(e.Path[:]), "\x00")
 
-	return o
+	d.Syscall, _, _ = strings.Cut(string(e.SysCall[:]), "\x00")
+
+	ev.Type = "file"
+	ev.Data = d
+	return ev
 }
 
 type File struct {
-	events chan FileEvent
-	tps    []link.Link
-	rb     *ringbuf.Reader
+	tps []link.Link
+	rb  *ringbuf.Reader
 }
 
 func (r *File) Close() {
@@ -53,11 +60,9 @@ func (r *File) Close() {
 	if err := r.rb.Close(); err != nil {
 		log.Fatalf("failed closing ringbuf reader: %s", err)
 	}
-
-	close(r.events)
 }
 
-func (r *File) ReceiveEvents() (<-chan FileEvent, error) {
+func (r *File) ReceiveEvents(c chan<- interface{}) error {
 	// Load the compiled eBPF ELF and load it into the kernel.
 	var objs fileObjects
 	if err := loadFileObjects(&objs, nil); err != nil {
@@ -67,46 +72,44 @@ func (r *File) ReceiveEvents() (<-chan FileEvent, error) {
 
 	tp, err := link.Tracepoint("syscalls", "sys_enter_newstat", objs.TraceStat, nil)
 	if err != nil {
-		log.Fatalf("attatching tracepoint: %s", err)
+		return fmt.Errorf("failed attatching tracepoint: %w", err)
 	}
 	r.tps = append(r.tps, tp)
 
 	tp, err = link.Tracepoint("syscalls", "sys_enter_newlstat", objs.TraceLstat, nil)
 	if err != nil {
-		log.Fatalf("attatching tracepoint: %s", err)
+		return fmt.Errorf("failed attatching tracepoint: %w", err)
 	}
 	r.tps = append(r.tps, tp)
 
 	tp, err = link.Tracepoint("syscalls", "sys_enter_open", objs.TraceOpen, nil)
 	if err != nil {
-		log.Fatalf("attatching tracepoint: %s", err)
+		return fmt.Errorf("failed attatching tracepoint: %w", err)
 	}
 	r.tps = append(r.tps, tp)
 
 	tp, err = link.Tracepoint("syscalls", "sys_enter_openat", objs.TraceOpenat, nil)
 	if err != nil {
-		log.Fatalf("attatching tracepoint: %s", err)
+		return fmt.Errorf("failed attatching tracepoint: %w", err)
 	}
 	r.tps = append(r.tps, tp)
 
 	tp, err = link.Tracepoint("syscalls", "sys_enter_openat2", objs.TraceOpenat2, nil)
 	if err != nil {
-		log.Fatalf("attatching tracepoint: %s", err)
+		return fmt.Errorf("failed attatching tracepoint: %w", err)
 	}
 	r.tps = append(r.tps, tp)
 
 	tp, err = link.Tracepoint("syscalls", "sys_enter_creat", objs.TraceCreat, nil)
 	if err != nil {
-		log.Fatalf("attatching tracepoint: %s", err)
+		return fmt.Errorf("failed attatching tracepoint: %w", err)
 	}
 	r.tps = append(r.tps, tp)
 
 	r.rb, err = ringbuf.NewReader(objs.RingBuffer)
 	if err != nil {
-		log.Fatalf("opening ringbuf reader: %s", err)
+		return fmt.Errorf("failed opening ringbuf reader: %s", err)
 	}
-
-	r.events = make(chan FileEvent)
 
 	go func() {
 		var event fileEvent
@@ -125,8 +128,9 @@ func (r *File) ReceiveEvents() (<-chan FileEvent, error) {
 				log.Printf("error parsing ringbuf event: %s", err)
 				continue
 			}
-			r.events <- convertExecEvent(event)
+
+			c <- convertExecEvent(event)
 		}
 	}()
-	return r.events, nil
+	return nil
 }

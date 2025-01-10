@@ -17,6 +17,7 @@ type execEvent struct {
 	Comm [256]uint8
 	Path [256]uint8
 	Argv [15][256]uint8
+	Envp [15][256]uint8
 }
 
 // loadExec returns the embedded CollectionSpec for exec.

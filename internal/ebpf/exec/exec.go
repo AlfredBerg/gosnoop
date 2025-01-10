@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"gosnoop/internal/event"
 	"log"
 	"strings"
 
@@ -12,51 +13,73 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 )
 
+type execData struct {
+	Path string   `json:"path"`
+	Argv []string `json:"argv"`
+	Envp []string `json:"envp"`
+}
+
 type ExecEvent struct {
-	comm string
-	pid  int //TODO: This is the pid of the spawned process, would be usefull with the parent pid
-	path string
-	argv []string
+	event.BaseEvent
+
+	Data execData `json:"data"`
 }
 
 func (r ExecEvent) String() string {
-	return fmt.Sprintf("Exec event from comm %s, pid %d: %s %s", r.comm, r.pid, r.path, strings.Join(r.argv, " "))
+	return fmt.Sprintf("Exec event from comm %s, pid %d: %s %s", r.ProcessInfo.Comm, r.ProcessInfo.PID, r.Data.Path, strings.Join(r.Data.Argv, " "))
 }
 
 func convertExecEvent(e execEvent) ExecEvent {
-	o := ExecEvent{}
-	o.comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
-	o.pid = int(e.Pid)
+	d := execData{}
+	ev := ExecEvent{}
 
-	o.path, _, _ = strings.Cut(string(e.Path[:]), "\x00")
+	ev.BaseEvent.ProcessInfo.Comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
+	ev.BaseEvent.ProcessInfo.PID = int(e.Pid)
+
+	d.Path, _, _ = strings.Cut(string(e.Path[:]), "\x00")
 	var argv []string
 	for _, a := range e.Argv {
 		arg, _, _ := strings.Cut(string(a[:]), "\x00")
+		if arg == "" {
+			continue
+		}
 		argv = append(argv, arg)
 	}
-	o.argv = argv
-	return o
+	d.Argv = argv
+
+	var envp []string
+	for _, a := range e.Envp {
+		arg, _, _ := strings.Cut(string(a[:]), "\x00")
+		if arg == "" {
+			continue
+		}
+		envp = append(envp, arg)
+	}
+	d.Envp = envp
+
+	ev.Type = "exec"
+	ev.Data = d
+
+	return ev
 }
 
 type Exec struct {
-	events chan ExecEvent
-	tp     link.Link
-	rb     *ringbuf.Reader
+	IncludeEnvp bool
+	tp          link.Link
+	rb          *ringbuf.Reader
 }
 
 func (r *Exec) Close() {
 	if err := r.tp.Close(); err != nil {
-		log.Fatalf("failed closing tracepoint: %s", err)
+		log.Fatalf("failed closing tracepoint: %w", err)
 	}
 
 	if err := r.rb.Close(); err != nil {
-		log.Fatalf("failed closing ringbuf reader: %s", err)
+		log.Fatalf("failed closing ringbuf reader: %w", err)
 	}
-
-	close(r.events)
 }
 
-func (r *Exec) ReceiveEvents() (<-chan ExecEvent, error) {
+func (r *Exec) ReceiveEvents(c chan<- interface{}) error {
 	// Load the compiled eBPF ELF and load it into the kernel.
 	var objs execObjects
 	if err := loadExecObjects(&objs, nil); err != nil {
@@ -67,15 +90,13 @@ func (r *Exec) ReceiveEvents() (<-chan ExecEvent, error) {
 	tp, err := link.Tracepoint("syscalls", "sys_enter_execve", objs.TraceExecve, nil)
 	r.tp = tp
 	if err != nil {
-		log.Fatalf("attatching tracepoint: %s", err)
+		return fmt.Errorf("attatching tracepoint: %w", err)
 	}
 
 	r.rb, err = ringbuf.NewReader(objs.RingBuffer)
 	if err != nil {
-		log.Fatalf("opening ringbuf reader: %s", err)
+		return fmt.Errorf("opening ringbuf reader: %w", err)
 	}
-
-	r.events = make(chan ExecEvent)
 
 	go func() {
 		var event execEvent
@@ -94,8 +115,12 @@ func (r *Exec) ReceiveEvents() (<-chan ExecEvent, error) {
 				log.Printf("error parsing ringbuf event: %s", err)
 				continue
 			}
-			r.events <- convertExecEvent(event)
+			execEvent := convertExecEvent(event)
+			if !r.IncludeEnvp {
+				execEvent.Data.Envp = []string{}
+			}
+			c <- execEvent
 		}
 	}()
-	return r.events, nil
+	return nil
 }

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"gosnoop/internal/ebpf/dns"
+	"gosnoop/internal/ebpf/exec"
+	"gosnoop/internal/ebpf/file"
 	"log"
 	"os"
 	"os/signal"
@@ -20,29 +23,38 @@ func main() {
 		log.Fatal("failed emoving memlock, do you have root priveledges? err: ", err)
 	}
 
-	// e := exec.Exec{}
-	// eventChan, err := e.ReceiveEvents()
-	// if err != nil {
-	// 	log.Fatal("failed receiving exec events: ", err)
-	// }
+	events := make(chan interface{})
 
-	// e := file.File{}
-	// eventChan, err := e.ReceiveEvents()
-	// if err != nil {
-	// 	log.Fatal("failed receiving exec events: ", err)
-	// }
-
-	d := dns.Dns{}
-	eventChan, err := d.ReceiveEvents()
+	exec := exec.Exec{IncludeEnvp: false}
+	err := exec.ReceiveEvents(events)
 	if err != nil {
 		log.Fatal("failed receiving exec events: ", err)
 	}
+	defer exec.Close()
+
+	file := file.File{}
+	err = file.ReceiveEvents(events)
+	if err != nil {
+		log.Fatal("failed receiving exec events: ", err)
+	}
+	defer file.Close()
+
+	dns := dns.Dns{}
+	err = dns.ReceiveEvents(events)
+	if err != nil {
+		log.Fatal("failed receiving exec events: ", err)
+	}
+	defer dns.Close()
 
 	go func() {
 		<-stopper
 	}()
 
-	for e := range eventChan {
-		fmt.Println(e.String())
+	for e := range events {
+		j, err := json.Marshal(e)
+		if err != nil {
+			log.Printf("failed to marshal event, err: %s", err)
+		}
+		fmt.Println(string(j))
 	}
 }
