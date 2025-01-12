@@ -36,10 +36,10 @@ struct event *unused __attribute__((unused));
 struct
 {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 12);
+    __uint(max_entries, 1 << 24);
 } ring_buffer SEC(".maps");
 
-//TODO: Does ipv6 work?
+// TODO: Does ipv6 work?
 SEC("kprobe/udp_sendmsg")
 int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t len)
 {
@@ -50,13 +50,14 @@ int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t le
     BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
     BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
 
+    bpf_printk("got udp packet");
     if (bpf_ntohs(dport) != DNS_PORT)
         return 0;
-
+    bpf_printk("got dns packet");
     struct event *event = bpf_ringbuf_reserve(&ring_buffer, sizeof(*event), 0);
     if (!event)
         return 0;
-
+    bpf_printk("reserved ring buff");
     if (msg)
     {
         struct iovec *iov;

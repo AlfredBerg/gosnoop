@@ -44,7 +44,6 @@ type DnsEvent struct {
 // }
 
 func convertdnsEvent(e dnsEvent) DnsEvent {
-
 	ev := DnsEvent{}
 	ev.ProcessInfo.Comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
 	ev.ProcessInfo.PID = int(e.Pid)

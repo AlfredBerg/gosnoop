@@ -4,6 +4,8 @@
 
 
 # TODO:
+* Resolve fd in file.c (e.g. openat)
+* improve the process infomration (identify docker container, add process stack)
 * arg for output to file (redirecting to file results in loop) and filtering
 
 
@@ -12,7 +14,7 @@
 * apt install libbpf-dev
 * sudo ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm
 * clang, apt install clang, add /lib/llvm-14/bin/ to PATH
-sudo apt-get install gcc-multilib
+* sudo apt-get install gcc-multilib
 
 
 
