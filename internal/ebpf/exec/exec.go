@@ -16,7 +16,7 @@ import (
 type execData struct {
 	Path string   `json:"path"`
 	Argv []string `json:"argv"`
-	Envp []string `json:"envp"`
+	Envp []string `json:"envp,omitempty"`
 }
 
 type ExecEvent struct {

@@ -48,6 +48,7 @@ func main() {
 
 	go func() {
 		<-stopper
+		close(events)
 	}()
 
 	for e := range events {

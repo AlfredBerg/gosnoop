@@ -13,13 +13,19 @@ import (
 )
 
 type dnsEvent struct {
+	ProcessInfo struct {
+		Pid   uint32
+		Comm  [256]uint8
+		Spid  [15]uint32
+		Scomm [15][256]uint8
+	}
 	Pid     uint32
+	Comm    [64]uint8
 	Sport   uint16
 	Dport   uint16
 	Saddr   uint32
 	Daddr   uint32
 	Ifindex uint32
-	Comm    [64]uint8
 	PktLen  uint16
 	PktData [512]uint8
 	_       [2]byte

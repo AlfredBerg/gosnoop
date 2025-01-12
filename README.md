@@ -1,8 +1,10 @@
 
-<div align="center"><img src="assets/gopher.webp" width="400"/></div>
+<div align="center"><img src="assets/gopher.webp" width="200"/></div>
 
 
 
+# TODO:
+* arg for output to file (redirecting to file results in loop) and filtering
 
 
 # requirements for building on debian

@@ -5,6 +5,8 @@
 #include <bpf/bpf_tracing.h>
 #include <string.h>
 
+#include "utils/process-utils.h"
+
 #define DNS_PORT 53
 #define IPPROTO_UDP 17
 
@@ -13,15 +15,15 @@
 // Struct to send DNS data and metadata to userspace
 struct event
 {
+    struct processInfo processInfo;
     __u32 pid;
+    __u8 comm[64];
 
     __u16 sport;
     __u16 dport;
     __u32 saddr;
     __u32 daddr;
     __u32 ifindex;
-
-    __u8 comm[64];
 
     __u16 pkt_len;
     __u8 pkt_data[PAYLOAD_MAX];
