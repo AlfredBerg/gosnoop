@@ -39,25 +39,21 @@ struct
     __uint(max_entries, 1 << 24);
 } ring_buffer SEC(".maps");
 
-// TODO: Does ipv6 work?
-SEC("kprobe/udp_sendmsg")
-int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t len)
-{
+static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_t len){
     if (!sk)
-        return 0;
+        return;
 
     __u16 sport, dport;
     BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
     BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
 
-    bpf_printk("got udp packet");
     if (bpf_ntohs(dport) != DNS_PORT)
-        return 0;
-    bpf_printk("got dns packet");
+        return;
+
     struct event *event = bpf_ringbuf_reserve(&ring_buffer, sizeof(*event), 0);
     if (!event)
-        return 0;
-    bpf_printk("reserved ring buff");
+        return;
+
     if (msg)
     {
         struct iovec *iov;
@@ -93,6 +89,20 @@ int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t le
     event->dport = bpf_htons(event->dport);
 
     bpf_ringbuf_submit(event, 0);
+}
+
+//TODO: Does ipv6 work?
+SEC("kprobe/udp_sendmsg")
+int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t len)
+{
+    handleDns(sk, msg, len);
+    return 0;
+}
+
+SEC("kprobe/tcp_sendmsg")
+int BPF_KPROBE(tcp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t size)
+{
+    handleDns(sk, msg, size);
     return 0;
 }
 

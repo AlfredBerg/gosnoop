@@ -73,15 +73,20 @@ func convertdnsEvent(e dnsEvent) DnsEvent {
 }
 
 type Dns struct {
-	ifXDP link.Link
-	rb    *ringbuf.Reader
-	objs  dnsObjects
+	udpKprobe link.Link
+	tcpKprobe link.Link
+	rb        *ringbuf.Reader
+	objs      dnsObjects
 }
 
 func (r *Dns) Close() {
 	r.objs.Close()
 
-	if err := r.ifXDP.Close(); err != nil {
+	if err := r.udpKprobe.Close(); err != nil {
+		log.Fatalf("failed closing tracepoint: %s", err)
+	}
+
+	if err := r.tcpKprobe.Close(); err != nil {
 		log.Fatalf("failed closing tracepoint: %s", err)
 	}
 
@@ -97,7 +102,12 @@ func (r *Dns) ReceiveEvents(c chan<- interface{}) error {
 	}
 
 	var err error
-	r.ifXDP, err = link.Kprobe("udp_sendmsg", r.objs.UdpSendmsgProbe, nil)
+	r.udpKprobe, err = link.Kprobe("udp_sendmsg", r.objs.UdpSendmsgProbe, nil)
+	if err != nil {
+		return fmt.Errorf("failed attatching kprobe: %w", err)
+	}
+
+	r.tcpKprobe, err = link.Kprobe("tcp_sendmsg", r.objs.TcpSendmsgProbe, nil)
 	if err != nil {
 		return fmt.Errorf("failed attatching kprobe: %w", err)
 	}

@@ -14,6 +14,7 @@
         "if_ether.h": "c",
         "socket.h": "c",
         "vmlinux.h": "c",
-        "bpf_tracing.h": "c"
+        "bpf_tracing.h": "c",
+        "process-utils.h": "c"
     }
 }

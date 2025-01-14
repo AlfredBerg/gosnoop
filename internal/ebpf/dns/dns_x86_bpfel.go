@@ -17,7 +17,7 @@ type dnsEvent struct {
 		Pid   uint32
 		Comm  [256]uint8
 		Spid  [15]uint32
-		Scomm [15][256]uint8
+		Scomm [15][64]uint8
 	}
 	Pid     uint32
 	Comm    [64]uint8
@@ -72,6 +72,7 @@ type dnsSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type dnsProgramSpecs struct {
+	TcpSendmsgProbe *ebpf.ProgramSpec `ebpf:"tcp_sendmsg_probe"`
 	UdpSendmsgProbe *ebpf.ProgramSpec `ebpf:"udp_sendmsg_probe"`
 }
 
@@ -114,11 +115,13 @@ func (m *dnsMaps) Close() error {
 //
 // It can be passed to loadDnsObjects or ebpf.CollectionSpec.LoadAndAssign.
 type dnsPrograms struct {
+	TcpSendmsgProbe *ebpf.Program `ebpf:"tcp_sendmsg_probe"`
 	UdpSendmsgProbe *ebpf.Program `ebpf:"udp_sendmsg_probe"`
 }
 
 func (p *dnsPrograms) Close() error {
 	return _DnsClose(
+		p.TcpSendmsgProbe,
 		p.UdpSendmsgProbe,
 	)
 }
