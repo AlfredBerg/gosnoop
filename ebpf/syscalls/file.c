@@ -87,9 +87,7 @@ int trace_lstat(struct lstat_ctx *ctx)
     struct event *event = 0;
     event = bpf_ringbuf_reserve(&ring_buffer, sizeof(struct event), 0);
     if (!event)
-    {
         return 0;
-    }
 
     // Zero out the struct as there might be some data from the previous use of the ring buffer
     for (int i = 0; i < sizeof(struct event); i++)
@@ -129,9 +127,7 @@ int trace_open(struct open_ctx *ctx)
     struct event *event = 0;
     event = bpf_ringbuf_reserve(&ring_buffer, sizeof(struct event), 0);
     if (!event)
-    {
         return 0;
-    }
 
     // Zero out the struct as there might be some data from the previous use of the ring buffer
     for (int i = 0; i < sizeof(struct event); i++)
@@ -174,9 +170,7 @@ int trace_openat(struct openat_ctx *ctx)
     struct event *event = 0;
     event = bpf_ringbuf_reserve(&ring_buffer, sizeof(struct event), 0);
     if (!event)
-    {
         return 0;
-    }
 
     // Zero out the struct as there might be some data from the previous use of the ring buffer
     for (int i = 0; i < sizeof(struct event); i++)
@@ -225,9 +219,7 @@ int trace_openat2(struct openat2_ctx *ctx)
     struct event *event = 0;
     event = bpf_ringbuf_reserve(&ring_buffer, sizeof(struct event), 0);
     if (!event)
-    {
         return 0;
-    }
 
     // Zero out the struct as there might be some data from the previous use of the ring buffer
     for (int i = 0; i < sizeof(struct event); i++)
@@ -273,9 +265,7 @@ int trace_creat(struct creat_ctx *ctx)
     struct event *event = 0;
     event = bpf_ringbuf_reserve(&ring_buffer, sizeof(struct event), 0);
     if (!event)
-    {
         return 0;
-    }
 
     // Zero out the struct as there might be some data from the previous use of the ring buffer
     for (int i = 0; i < sizeof(struct event); i++)

@@ -39,15 +39,13 @@ static __always_inline void collectProcessInfo(struct processInfo *p)
     {
         task = BPF_CORE_READ(task, parent);
         if (task == 0)
-        {
             break;
-        }
+
         __u32 pid;
         pid = BPF_CORE_READ(task, pid);
         if (pid == 0)
-        {
             break;
-        }
+
         p->spid[i] = pid;
 
         const char *pcomm;

@@ -48,9 +48,7 @@ int trace_execve(struct exec_ctx *ctx)
     struct event *event = 0;
     event = bpf_ringbuf_reserve(&ring_buffer, sizeof(struct event), 0);
     if (!event)
-    {
         return 0;
-    }
 
     // Zero out the struct as there might be some data from the previous use of the ring buffer
     for (int i = 0; i < sizeof(struct event); i++)
@@ -67,13 +65,10 @@ int trace_execve(struct exec_ctx *ctx)
         bpf_probe_read_user(&argp, sizeof(argp), &ctx->argv[i]);
 
         if (!argp)
-        {
             break;
-        }
 
         bpf_probe_read_user_str(event->argv[i], sizeof(event->argv[i]), argp);
     }
-
 
     for (int i = 0; i < MAX_ARGS; i++)
     {
@@ -82,9 +77,7 @@ int trace_execve(struct exec_ctx *ctx)
         bpf_probe_read_user(&env, sizeof(env), &ctx->envp[i]);
 
         if (!env)
-        {
             break;
-        }
 
         bpf_probe_read_user_str(event->envp[i], sizeof(event->envp[i]), env);
     }
