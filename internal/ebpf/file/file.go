@@ -33,8 +33,17 @@ func convertExecEvent(e fileEvent) FileEvent {
 	d := fileData{}
 	ev := FileEvent{}
 
-	ev.BaseEvent.ProcessInfo.Comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
-	ev.BaseEvent.ProcessInfo.PID = int(e.Pid)
+	ev.ProcessInfo.Comm, _, _ = strings.Cut(string(e.ProcessInfo.Comm[:]), "\x00")
+	ev.ProcessInfo.Cgroup, _, _ = strings.Cut(string(e.ProcessInfo.Cgroup[:]), "\x00")
+	ev.ProcessInfo.PID = int(e.ProcessInfo.Pid)
+	for i := 0; i < len(e.ProcessInfo.Spid); i++ {
+		pid := int(e.ProcessInfo.Spid[i])
+		if pid == 0 {
+			break
+		}
+		comm, _, _ := strings.Cut(string(e.ProcessInfo.Scomm[i][:]), "\x00")
+		ev.ProcessInfo.Parents = append(ev.ProcessInfo.Parents, event.Process{Comm: comm, PID: pid})
+	}
 
 	d.Path, _, _ = strings.Cut(string(e.Path[:]), "\x00")
 

@@ -4,6 +4,8 @@
 #include <bpf/bpf_helpers.h>
 #include <string.h>
 
+#include "utils/process-utils.h"
+
 #define BUF_SIZE 256
 #define MAX_ARGS 15
 
@@ -11,8 +13,7 @@ typedef unsigned int uint32_t;
 
 struct event
 {
-    __u32 pid;
-    __u8 comm[BUF_SIZE]; // name of process
+    struct processInfo processInfo;
 
     __u8 sysCall[BUF_SIZE];
 
@@ -62,8 +63,7 @@ int trace_stat(struct stat_ctx *ctx)
     const char syscall[] = "stat";
     memcpy(&event->sysCall, syscall, sizeof(syscall));
 
-    event->pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    collectProcessInfo(&event->processInfo);
 
     bpf_ringbuf_submit(event, 0);
 
@@ -102,8 +102,7 @@ int trace_lstat(struct lstat_ctx *ctx)
     const char syscall[] = "lstat";
     memcpy(&event->sysCall, syscall, sizeof(syscall));
 
-    event->pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    collectProcessInfo(&event->processInfo);
 
     bpf_ringbuf_submit(event, 0);
 
@@ -145,8 +144,7 @@ int trace_open(struct open_ctx *ctx)
     const char syscall[] = "open";
     memcpy(&event->sysCall, syscall, sizeof(syscall));
 
-    event->pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    collectProcessInfo(&event->processInfo);
 
     bpf_ringbuf_submit(event, 0);
 
@@ -198,8 +196,7 @@ int trace_openat(struct openat_ctx *ctx)
     const char syscall[] = "openat";
     memcpy(&event->sysCall, syscall, sizeof(syscall));
 
-    event->pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    collectProcessInfo(&event->processInfo);
 
     bpf_ringbuf_submit(event, 0);
 
@@ -250,8 +247,7 @@ int trace_openat2(struct openat2_ctx *ctx)
     const char syscall[] = "openat2";
     memcpy(&event->sysCall, syscall, sizeof(syscall));
 
-    event->pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    collectProcessInfo(&event->processInfo);
 
     bpf_ringbuf_submit(event, 0);
 
@@ -292,8 +288,7 @@ int trace_creat(struct creat_ctx *ctx)
     const char syscall[] = "creat";
     memcpy(&event->sysCall, syscall, sizeof(syscall));
 
-    event->pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    collectProcessInfo(&event->processInfo);
 
     bpf_ringbuf_submit(event, 0);
 

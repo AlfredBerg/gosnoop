@@ -13,8 +13,13 @@ import (
 )
 
 type execEvent struct {
-	Pid  uint32
-	Comm [256]uint8
+	ProcessInfo struct {
+		Pid    uint32
+		Comm   [256]uint8
+		Cgroup [64]uint8
+		Spid   [15]uint32
+		Scomm  [15][64]uint8
+	}
 	Path [256]uint8
 	Argv [15][256]uint8
 	Envp [15][256]uint8

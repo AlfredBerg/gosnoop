@@ -36,17 +36,20 @@ type DnsEvent struct {
 	Data dnsdata `json:"data"`
 }
 
-// func (r dnsdata) String() string {
-// 	sb := strings.Builder{}
-// 	sb.WriteString(fmt.Sprintf("DNS event from comm %s, pid %d: ", r.comm, r.pid))
-
-// 	return sb.String()
-// }
-
 func convertdnsEvent(e dnsEvent) DnsEvent {
 	ev := DnsEvent{}
-	ev.ProcessInfo.Comm, _, _ = strings.Cut(string(e.Comm[:]), "\x00")
-	ev.ProcessInfo.PID = int(e.Pid)
+
+	ev.ProcessInfo.Comm, _, _ = strings.Cut(string(e.ProcessInfo.Comm[:]), "\x00")
+	ev.ProcessInfo.Cgroup, _, _ = strings.Cut(string(e.ProcessInfo.Cgroup[:]), "\x00")
+	ev.ProcessInfo.PID = int(e.ProcessInfo.Pid)
+	for i := 0; i < len(e.ProcessInfo.Spid); i++ {
+		pid := int(e.ProcessInfo.Spid[i])
+		if pid == 0 {
+			break
+		}
+		comm, _, _ := strings.Cut(string(e.ProcessInfo.Scomm[i][:]), "\x00")
+		ev.ProcessInfo.Parents = append(ev.ProcessInfo.Parents, event.Process{Comm: comm, PID: pid})
+	}
 
 	ev.Type = "dns"
 
@@ -74,9 +77,9 @@ func convertdnsEvent(e dnsEvent) DnsEvent {
 
 type Dns struct {
 	udpKprobe link.Link
-	tcpKprobe link.Link
-	rb        *ringbuf.Reader
-	objs      dnsObjects
+	// tcpKprobe link.Link
+	rb   *ringbuf.Reader
+	objs dnsObjects
 }
 
 func (r *Dns) Close() {
@@ -86,9 +89,9 @@ func (r *Dns) Close() {
 		log.Fatalf("failed closing tracepoint: %s", err)
 	}
 
-	if err := r.tcpKprobe.Close(); err != nil {
-		log.Fatalf("failed closing tracepoint: %s", err)
-	}
+	// if err := r.tcpKprobe.Close(); err != nil {
+	// 	log.Fatalf("failed closing tracepoint: %s", err)
+	// }
 
 	if err := r.rb.Close(); err != nil {
 		log.Fatalf("failed closing ringbuf reader: %s", err)
@@ -107,10 +110,10 @@ func (r *Dns) ReceiveEvents(c chan<- interface{}) error {
 		return fmt.Errorf("failed attatching kprobe: %w", err)
 	}
 
-	r.tcpKprobe, err = link.Kprobe("tcp_sendmsg", r.objs.TcpSendmsgProbe, nil)
-	if err != nil {
-		return fmt.Errorf("failed attatching kprobe: %w", err)
-	}
+	// r.tcpKprobe, err = link.Kprobe("tcp_sendmsg", r.objs.TcpSendmsgProbe, nil)
+	// if err != nil {
+	// 	return fmt.Errorf("failed attatching kprobe: %w", err)
+	// }
 
 	r.rb, err = ringbuf.NewReader(r.objs.RingBuffer)
 	if err != nil {

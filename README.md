@@ -5,7 +5,8 @@
 
 # TODO:
 * Resolve fd in file.c (e.g. openat)
-* improve the process infomration (identify docker container, add process stack)
+* improve the process info (identify docker container)
+* TCP dns
 * arg for output to file (redirecting to file results in loop) and filtering
 
 

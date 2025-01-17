@@ -1,3 +1,4 @@
+// go:build ignore
 #include <vmlinux.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
@@ -39,7 +40,8 @@ struct
     __uint(max_entries, 1 << 24);
 } ring_buffer SEC(".maps");
 
-static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_t len){
+static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_t len)
+{
     if (!sk)
         return;
 
@@ -53,7 +55,7 @@ static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_
     struct event *event = bpf_ringbuf_reserve(&ring_buffer, sizeof(*event), 0);
     if (!event)
         return;
-
+    
     if (msg)
     {
         struct iovec *iov;
@@ -73,10 +75,7 @@ static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_
         }
     }
 
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-    event->pid = pid_tgid >> 32;
-
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    collectProcessInfo(&event->processInfo);
 
     event->sport = sport;
     event->dport = dport;
@@ -91,7 +90,7 @@ static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_
     bpf_ringbuf_submit(event, 0);
 }
 
-//TODO: Does ipv6 work?
+// TODO: Does ipv6 work?
 SEC("kprobe/udp_sendmsg")
 int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t len)
 {
@@ -99,11 +98,12 @@ int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t le
     return 0;
 }
 
-SEC("kprobe/tcp_sendmsg")
-int BPF_KPROBE(tcp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t size)
-{
-    handleDns(sk, msg, size);
-    return 0;
-}
+// Not working currently for unclear reasons
+// SEC("kprobe/tcp_sendmsg")
+// int BPF_KPROBE(tcp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t size)
+// {
+//     handleDns(sk, msg, size);
+//     return 0;
+// }
 
 char _license[] SEC("license") = "Dual MIT/GPL";

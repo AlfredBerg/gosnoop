@@ -3,6 +3,8 @@
 #include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
 
+#include "utils/process-utils.h"
+
 #define BUF_SIZE 256
 #define MAX_ARGS 15
 
@@ -10,8 +12,7 @@ typedef unsigned int uint32_t;
 
 struct event
 {
-    __u32 pid;
-    __u8 comm[BUF_SIZE]; // name of process
+    struct processInfo processInfo;
 
     __u8 path[BUF_SIZE];
     __u8 argv[MAX_ARGS][BUF_SIZE];
@@ -88,8 +89,7 @@ int trace_execve(struct exec_ctx *ctx)
         bpf_probe_read_user_str(event->envp[i], sizeof(event->envp[i]), env);
     }
 
-    event->pid = bpf_get_current_pid_tgid();
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    collectProcessInfo(&event->processInfo);
 
     bpf_ringbuf_submit(event, 0);
 
