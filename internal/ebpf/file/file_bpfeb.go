@@ -20,8 +20,9 @@ type fileEvent struct {
 		Spid   [15]uint32
 		Scomm  [15][64]uint8
 	}
-	SysCall [256]uint8
-	Path    [256]uint8
+	SysCall      [256]uint8
+	Path         [256]uint8
+	PathSegments [32][256]uint8
 }
 
 // loadFile returns the embedded CollectionSpec for file.

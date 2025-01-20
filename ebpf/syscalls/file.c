@@ -7,7 +7,9 @@
 #include "utils/process-utils.h"
 
 #define BUF_SIZE 256
-#define MAX_ARGS 15
+#define MAX_DFD_DEPTH 32
+
+#define MAX_FD_ENTRIES 4
 
 typedef unsigned int uint32_t;
 
@@ -18,6 +20,8 @@ struct event
     __u8 sysCall[BUF_SIZE];
 
     __u8 path[BUF_SIZE];
+
+    __u8 pathSegments[MAX_DFD_DEPTH][BUF_SIZE]; // used when walking file descriptors, and rebuilding the path in userspace due to ebpf program complexity constriants
 };
 
 // Needed to not have event struct be optmized away
@@ -150,16 +154,16 @@ int trace_open(struct open_ctx *ctx)
 // from /sys/kernel/debug/tracing/events/syscalls/sys_enter_openat/format
 struct openat_ctx
 {
-    unsigned short common_type;
-    unsigned char common_flags;
-    unsigned char common_preempt_count;
-    int common_pid;
+    __u16 common_type;
+    __u8 common_flags;
+    __u8 common_preempt_count;
+    __u32 common_pid;
 
-    int __syscall_nr;
-    int dfd;
+    __u32 __syscall_nr;
+    __u64 dfd; // Must be u64 instead of just a u32 int as specified in the sys_enter_openat/format
     const char *filename;
-    // int flags;
-    // umode_t mode;
+    int flags;
+    umode_t mode;
 };
 
 // TODO: The dfd file descriptor should be resolved in combination with filename as described here https://manpages.debian.org/unstable/manpages-dev/openat.2.en.html
@@ -178,13 +182,32 @@ int trace_openat(struct openat_ctx *ctx)
         ((volatile char *)event)[i] = 0;
     }
 
-    bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
+    bpf_probe_read_str(&event->path, sizeof(event->path), (char *)ctx->filename);
 
-    // Skip printing any path if only the fd is passed (until some good way to resolve it is found)
-    if (!event->path[0])
+    // Relative path
+    if (event->path[0] != '/')
     {
-        bpf_ringbuf_discard(event, 0);
-        return 0;
+        struct task_struct *task;
+        struct dentry *dentry;
+        int path_len = 0;
+        task = (struct task_struct *)bpf_get_current_task_btf();
+        dentry = task->fs->pwd.dentry;
+        for (int i = 0; i < MAX_FD_ENTRIES; i++)
+        {
+            char name[BUF_SIZE] = "";
+            int name_len = bpf_probe_read_str(event->pathSegments[i], sizeof(event->pathSegments[i]), (void *)dentry->d_name.name);
+            if (name_len < 0)
+            {
+                break;
+            }
+
+            // Root directory
+            if (dentry == dentry->d_parent)
+            {
+                break;
+            }
+            dentry = dentry->d_parent;
+        }
     }
 
     const char syscall[] = "openat";
@@ -200,19 +223,18 @@ int trace_openat(struct openat_ctx *ctx)
 // from /sys/kernel/debug/tracing/events/syscalls/sys_enter_openat2/format
 struct openat2_ctx
 {
-    unsigned short common_type;
-    unsigned char common_flags;
-    unsigned char common_preempt_count;
-    int common_pid;
+    __u16 common_type;
+    __u8 common_flags;
+    __u8 common_preempt_count;
+    __u32 common_pid;
 
-    int __syscall_nr;
-    int dfd;
-    const char *filename;
+    __u32 __syscall_nr;
+    __u64 dfd; // Must be u64 instead of just a u32 int as specified in the sys_enter_openat2/format
+    __u64 *filename;
     struct open_how *how;
     // size_t usize
 };
 
-// TODO: The dfd file descriptor should be resolved in combination with filename as described here https://manpages.debian.org/unstable/manpages-dev/openat2.2.en.html
 SEC("tracepoint/syscalls/sys_enter_openat2")
 int trace_openat2(struct openat2_ctx *ctx)
 {
@@ -227,13 +249,32 @@ int trace_openat2(struct openat2_ctx *ctx)
         ((volatile char *)event)[i] = 0;
     }
 
-    bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
+    bpf_probe_read_str(&event->path, sizeof(event->path), (char *)ctx->filename);
 
-    // Skip printing any path if only the fd is passed (until some good way to resolve it is found)
-    if (!event->path[0])
+    // Relative path
+    if (event->path[0] != '/')
     {
-        bpf_ringbuf_discard(event, 0);
-        return 0;
+        struct task_struct *task;
+        struct dentry *dentry;
+        int path_len = 0;
+        task = (struct task_struct *)bpf_get_current_task_btf();
+        dentry = task->fs->pwd.dentry;
+        for (int i = 0; i < MAX_FD_ENTRIES; i++)
+        {
+            char name[BUF_SIZE] = "";
+            int name_len = bpf_probe_read_str(event->pathSegments[i], sizeof(event->pathSegments[i]), (void *)dentry->d_name.name);
+            if (name_len < 0)
+            {
+                break;
+            }
+
+            // Root directory
+            if (dentry == dentry->d_parent)
+            {
+                break;
+            }
+            dentry = dentry->d_parent;
+        }
     }
 
     const char syscall[] = "openat2";

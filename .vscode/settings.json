@@ -15,6 +15,7 @@
         "socket.h": "c",
         "vmlinux.h": "c",
         "bpf_tracing.h": "c",
-        "process-utils.h": "c"
+        "process-utils.h": "c",
+        "typeinfo": "c"
     }
 }

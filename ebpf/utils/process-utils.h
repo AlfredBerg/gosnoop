@@ -3,14 +3,14 @@
 #include <bpf/bpf_core_read.h>
 #include <string.h>
 
-#define BUF_SIZE 256
+#define PROCESS_INFO_BUF_SIZE 256
 #define COMM_SIZE 64
 #define MAX_STACK 15
 
 struct processInfo
 {
     __u32 pid;
-    __u8 comm[BUF_SIZE]; // name of process
+    __u8 comm[PROCESS_INFO_BUF_SIZE]; // name of process
 
     __u8 cgroup[64];
 

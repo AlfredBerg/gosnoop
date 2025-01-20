@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"gosnoop/internal/event"
 	"log"
+	"slices"
 	"strings"
 
 	"github.com/cilium/ebpf/link"
@@ -29,7 +30,7 @@ func (r FileEvent) String() string {
 	return fmt.Sprintf("File event from comm %s, pid %d, syscall %s: %s", r.BaseEvent.ProcessInfo.Comm, r.BaseEvent.ProcessInfo.PID, r.Data.Syscall, r.Data.Path)
 }
 
-func convertExecEvent(e fileEvent) FileEvent {
+func convertFileEvent(e fileEvent) FileEvent {
 	d := fileData{}
 	ev := FileEvent{}
 
@@ -48,6 +49,20 @@ func convertExecEvent(e fileEvent) FileEvent {
 	d.Path, _, _ = strings.Cut(string(e.Path[:]), "\x00")
 
 	d.Syscall, _, _ = strings.Cut(string(e.SysCall[:]), "\x00")
+
+	if (d.Syscall == "openat" || d.Syscall == "openat2") && !strings.HasPrefix(d.Path, "/") {
+		var pSegments []string
+		for _, p := range e.PathSegments {
+			pSegment, _, _ := strings.Cut(string(p[:]), "\x00")
+			if pSegment == "" {
+				break
+			}
+			pSegments = append(pSegments, pSegment)
+		}
+		slices.Reverse(pSegments)
+
+		d.Path = "/" + strings.Join(pSegments[1:], "/") + d.Path
+	}
 
 	ev.Type = "file"
 	ev.Data = d
@@ -138,7 +153,7 @@ func (r *File) ReceiveEvents(c chan<- interface{}) error {
 				continue
 			}
 
-			c <- convertExecEvent(event)
+			c <- convertFileEvent(event)
 		}
 	}()
 	return nil
