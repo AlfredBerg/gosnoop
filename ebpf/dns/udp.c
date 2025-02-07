@@ -1,4 +1,7 @@
 // go:build ignore
+
+// Originally from https://github.com/whoopscs/dnsflux/blob/1870de1d70049f97849acc184a24c0f29f925e5a/platform/bpf/dnsfilter.c but adapted. Note the GPL license
+
 #include <vmlinux.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
@@ -9,7 +12,6 @@
 #include "utils/process-utils.h"
 
 #define DNS_PORT 53
-#define IPPROTO_UDP 17
 
 #define PAYLOAD_MAX 512
 
@@ -19,12 +21,6 @@ struct event
     struct processInfo processInfo;
     __u32 pid;
     __u8 comm[64];
-
-    __u16 sport;
-    __u16 dport;
-    __u32 saddr;
-    __u32 daddr;
-    __u32 ifindex;
 
     __u16 pkt_len;
     __u8 pkt_data[PAYLOAD_MAX];
@@ -77,16 +73,6 @@ static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_
 
     collectProcessInfo(&event->processInfo);
 
-    event->sport = sport;
-    event->dport = dport;
-    BPF_CORE_READ_INTO(&event->saddr, sk, __sk_common.skc_rcv_saddr);
-    BPF_CORE_READ_INTO(&event->daddr, sk, __sk_common.skc_daddr);
-    BPF_CORE_READ_INTO(&event->ifindex, sk, __sk_common.skc_bound_dev_if);
-    event->saddr = bpf_htonl(event->saddr);
-    event->daddr = bpf_htonl(event->daddr);
-    event->sport = bpf_htons(event->sport);
-    event->dport = bpf_htons(event->dport);
-
     bpf_ringbuf_submit(event, 0);
 }
 
@@ -106,4 +92,4 @@ int BPF_KPROBE(udp_sendmsg_probe, struct sock *sk, struct msghdr *msg, size_t le
 //     return 0;
 // }
 
-char _license[] SEC("license") = "Dual MIT/GPL";
+char _license[] SEC("license") = "GPL";

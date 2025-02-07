@@ -2,6 +2,7 @@ package file
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -86,7 +88,7 @@ func (r *File) Close() {
 	}
 }
 
-func (r *File) ReceiveEvents(c chan<- interface{}) error {
+func (r *File) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- interface{}) error {
 	// Load the compiled eBPF ELF and load it into the kernel.
 	var objs fileObjects
 	if err := loadFileObjects(&objs, nil); err != nil {
@@ -135,25 +137,39 @@ func (r *File) ReceiveEvents(c chan<- interface{}) error {
 		return fmt.Errorf("failed opening ringbuf reader: %s", err)
 	}
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		var event fileEvent
+
+		go func() {
+			<-ctx.Done()
+			r.rb.Close()
+		}()
+
 		for {
-			record, err := r.rb.Read()
-			if err != nil {
-				if errors.Is(err, ringbuf.ErrClosed) {
-					log.Println("rungbufer closed, exiting..")
-					return
+			select {
+			case <-ctx.Done():
+				return
+
+			default:
+				record, err := r.rb.Read()
+				if err != nil {
+					if errors.Is(err, ringbuf.ErrClosed) {
+						log.Println("rungbuffer closed, exiting..")
+						return
+					}
+					log.Printf("error reading from reader: %s", err)
+					continue
 				}
-				log.Printf("error reading from reader: %s", err)
-				continue
-			}
 
-			if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
-				log.Printf("error parsing ringbuf event: %s", err)
-				continue
-			}
+				if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+					log.Printf("error parsing ringbuf event: %s", err)
+					continue
+				}
 
-			c <- convertFileEvent(event)
+				c <- convertFileEvent(event)
+			}
 		}
 	}()
 	return nil

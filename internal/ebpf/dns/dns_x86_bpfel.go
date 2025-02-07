@@ -22,11 +22,6 @@ type dnsEvent struct {
 	}
 	Pid     uint32
 	Comm    [64]uint8
-	Sport   uint16
-	Dport   uint16
-	Saddr   uint32
-	Daddr   uint32
-	Ifindex uint32
 	PktLen  uint16
 	PktData [512]uint8
 	_       [2]byte

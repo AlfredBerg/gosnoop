@@ -1,22 +1,32 @@
 
 <div align="center"><img src="assets/gopher.webp" width="200"/></div>
 
+# GoSnoop
+Inspect syscalls system wide for program executions and files being read or written, as well as if files exist.  
+The program also logs outgoing DNS requests.
+
+This is achived by using eBPF.
+
+# Examples
+
+# Install:
+Requires Linux kernel version 5.7 or later, as well as root permissions (to be able to run eBPF programs)
+
+
 
 
 # TODO:
-* Resolve fd in file.c (e.g. openat)
-* improve the process info (identify docker container)
-* TCP dns
+* Build terminal UI to inspect captured data
+* Support dns over TCP
 * arg for output to file (redirecting to file results in loop) and filtering
 
 
-# requirements for building on debian
-* see https://ebpf-go.dev/guides/getting-started/#whats-next
-* apt install libbpf-dev
-* sudo ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm
-* clang, apt install clang, add /lib/llvm-14/bin/ to PATH
-* sudo apt-get install gcc-multilib
-
+# Build:
+## Debian
+* See requirements and install dependencies from https://ebpf-go.dev/guides/getting-started/#ebpf-c-program
+* install dependencies `apt install libbpf-dev clang gcc-multilib`
+* `go generate ./...` to build eBPF programs and generate go files for them
+* `CGO_ENABLED=0 go build` to build the program. `CGO_ENABLED=0` is required to avoid dynamic linking (making sure the program is portable)
 
 
 # References

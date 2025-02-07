@@ -2,12 +2,14 @@ package exec
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"gosnoop/internal/event"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -80,15 +82,15 @@ type Exec struct {
 
 func (r *Exec) Close() {
 	if err := r.tp.Close(); err != nil {
-		log.Fatalf("failed closing tracepoint: %w", err)
+		log.Fatalf("failed closing tracepoint: %s", err)
 	}
 
 	if err := r.rb.Close(); err != nil {
-		log.Fatalf("failed closing ringbuf reader: %w", err)
+		log.Fatalf("failed closing ringbuf reader: %s", err)
 	}
 }
 
-func (r *Exec) ReceiveEvents(c chan<- interface{}) error {
+func (r *Exec) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- interface{}) error {
 	// Load the compiled eBPF ELF and load it into the kernel.
 	var objs execObjects
 	if err := loadExecObjects(&objs, nil); err != nil {
@@ -107,28 +109,43 @@ func (r *Exec) ReceiveEvents(c chan<- interface{}) error {
 		return fmt.Errorf("opening ringbuf reader: %w", err)
 	}
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		var event execEvent
-		for {
-			record, err := r.rb.Read()
-			if err != nil {
-				if errors.Is(err, ringbuf.ErrClosed) {
-					log.Println("rungbufer closed, exiting..")
-					return
-				}
-				log.Printf("error reading from reader: %s", err)
-				continue
-			}
 
-			if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
-				log.Printf("error parsing ringbuf event: %s", err)
-				continue
+		go func() {
+			<-ctx.Done()
+			r.rb.Close()
+		}()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			default:
+				r.rb.Close()
+				record, err := r.rb.Read()
+				if err != nil {
+					if errors.Is(err, ringbuf.ErrClosed) {
+						log.Println("rungbuffer closed, exiting..")
+						return
+					}
+					log.Printf("error reading from reader: %s", err)
+					continue
+				}
+
+				if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+					log.Printf("error parsing ringbuf event: %s", err)
+					continue
+				}
+				execEvent := convertExecEvent(event)
+				if !r.IncludeEnvp {
+					execEvent.Data.Envp = []string{}
+				}
+				c <- execEvent
 			}
-			execEvent := convertExecEvent(event)
-			if !r.IncludeEnvp {
-				execEvent.Data.Envp = []string{}
-			}
-			c <- execEvent
 		}
 	}()
 	return nil

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"gosnoop/internal/ebpf/dns"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/cilium/ebpf/rlimit"
@@ -20,34 +22,37 @@ func main() {
 
 	// Remove resource limits for kernels <5.11.
 	if err := rlimit.RemoveMemlock(); err != nil {
-		log.Fatal("failed emoving memlock, do you have root priveledges? err: ", err)
+		log.Fatal("failed removing memlock, do you have root priveledges? err: ", err)
 	}
 
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	wg := sync.WaitGroup{}
 	events := make(chan interface{})
 
 	exec := exec.Exec{IncludeEnvp: false}
-	err := exec.ReceiveEvents(events)
+	err := exec.ReceiveEvents(ctx, &wg, events)
 	if err != nil {
 		log.Fatal("failed receiving exec events: ", err)
 	}
 	defer exec.Close()
 
 	file := file.File{}
-	err = file.ReceiveEvents(events)
+	err = file.ReceiveEvents(ctx, &wg, events)
 	if err != nil {
 		log.Fatal("failed receiving exec events: ", err)
 	}
 	defer file.Close()
 
 	dns := dns.Dns{}
-	err = dns.ReceiveEvents(events)
+	err = dns.ReceiveEvents(ctx, &wg, events)
 	if err != nil {
 		log.Fatal("failed receiving exec events: ", err)
 	}
 	defer dns.Close()
-
 	go func() {
 		<-stopper
+		ctxCancel()
+		wg.Wait()
 		close(events)
 	}()
 
