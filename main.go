@@ -16,6 +16,11 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
+type eventCollector interface {
+	Close()
+	ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- interface{}) error
+}
+
 func main() {
 	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
@@ -29,26 +34,20 @@ func main() {
 	wg := sync.WaitGroup{}
 	events := make(chan interface{})
 
-	exec := exec.Exec{IncludeEnvp: false}
-	err := exec.ReceiveEvents(ctx, &wg, events)
-	if err != nil {
-		log.Fatal("failed receiving exec events: ", err)
+	var colls []eventCollector = []eventCollector{
+		&exec.Exec{IncludeEnvp: false},
+		&file.File{},
+		&dns.Dns{},
 	}
-	defer exec.Close()
 
-	file := file.File{}
-	err = file.ReceiveEvents(ctx, &wg, events)
-	if err != nil {
-		log.Fatal("failed receiving exec events: ", err)
+	for _, c := range colls {
+		err := c.ReceiveEvents(ctx, &wg, events)
+		if err != nil {
+			log.Fatal("failed receiving exec events: ", err)
+		}
+		defer c.Close()
 	}
-	defer file.Close()
 
-	dns := dns.Dns{}
-	err = dns.ReceiveEvents(ctx, &wg, events)
-	if err != nil {
-		log.Fatal("failed receiving exec events: ", err)
-	}
-	defer dns.Close()
 	go func() {
 		<-stopper
 		ctxCancel()

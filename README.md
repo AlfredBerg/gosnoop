@@ -18,7 +18,6 @@ Requires Linux kernel version 5.7 or later, as well as root permissions (to be a
 # TODO:
 * Build terminal UI to inspect captured data
 * Support dns over TCP
-* arg for output to file (redirecting to file results in loop) and filtering
 
 
 # Build:

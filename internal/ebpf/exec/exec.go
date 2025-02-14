@@ -125,7 +125,6 @@ func (r *Exec) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- i
 				return
 
 			default:
-				r.rb.Close()
 				record, err := r.rb.Read()
 				if err != nil {
 					if errors.Is(err, ringbuf.ErrClosed) {
