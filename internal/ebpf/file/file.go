@@ -102,6 +102,12 @@ func (r *File) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- i
 	}
 	r.tps = append(r.tps, tp)
 
+	tp, err = link.Tracepoint("syscalls", "sys_enter_newfstatat", objs.TraceFstatat, nil)
+	if err != nil {
+		return fmt.Errorf("failed attatching tracepoint: %w", err)
+	}
+	r.tps = append(r.tps, tp)
+
 	tp, err = link.Tracepoint("syscalls", "sys_enter_newlstat", objs.TraceLstat, nil)
 	if err != nil {
 		return fmt.Errorf("failed attatching tracepoint: %w", err)

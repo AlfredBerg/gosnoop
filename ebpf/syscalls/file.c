@@ -33,6 +33,30 @@ struct
     __uint(max_entries, 1 << 24);
 } ring_buffer SEC(".maps");
 
+static __always_inline void walkFD(struct event *event)
+{
+    struct task_struct *task;
+    struct dentry *dentry;
+    task = (struct task_struct *)bpf_get_current_task_btf();
+    dentry = task->fs->pwd.dentry;
+    for (int i = 0; i < MAX_FD_ENTRIES; i++)
+    {
+        char name[BUF_SIZE] = "";
+        int name_len = bpf_probe_read_str(event->pathSegments[i], sizeof(event->pathSegments[i]), (void *)dentry->d_name.name);
+        if (name_len < 0)
+        {
+            break;
+        }
+
+        // Root directory
+        if (dentry == dentry->d_parent)
+        {
+            break;
+        }
+        dentry = dentry->d_parent;
+    }
+}
+
 // from /sys/kernel/debug/tracing/events/syscalls/sys_enter_newstat/format
 struct stat_ctx
 {
@@ -65,6 +89,52 @@ int trace_stat(struct stat_ctx *ctx)
     bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
 
     const char syscall[] = "stat";
+    memcpy(&event->sysCall, syscall, sizeof(syscall));
+
+    collectProcessInfo(&event->processInfo);
+
+    bpf_ringbuf_submit(event, 0);
+
+    return 0;
+}
+
+// from /sys/kernel/debug/tracing/events/syscalls/sys_enter_newfstatat/format
+struct fstatat_ctx
+{
+    unsigned short common_type;
+    unsigned char common_flags;
+    unsigned char common_preempt_count;
+    int common_pid;
+
+    int __syscall_nr;
+    __u64 dfd;
+    const char *filename;
+    // stat *statbuf;
+    // int flags;
+};
+SEC("tracepoint/syscalls/sys_enter_newfstatat")
+int trace_fstatat(struct fstatat_ctx *ctx)
+{
+    struct event *event = 0;
+    event = bpf_ringbuf_reserve(&ring_buffer, sizeof(struct event), 0);
+    if (!event)
+        return 0;
+
+    // Zero out the struct as there might be some data from the previous use of the ring buffer
+    for (int i = 0; i < sizeof(struct event); i++)
+    {
+        ((volatile char *)event)[i] = 0;
+    }
+
+    bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
+
+    // Relative path
+    if (event->path[0] != '/')
+    {
+        walkFD(event);
+    }
+
+    const char syscall[] = "fstatat";
     memcpy(&event->sysCall, syscall, sizeof(syscall));
 
     collectProcessInfo(&event->processInfo);
@@ -188,30 +258,6 @@ int trace_creat(struct creat_ctx *ctx)
     bpf_ringbuf_submit(event, 0);
 
     return 0;
-}
-
-static __always_inline void walkFD(struct event *event)
-{
-    struct task_struct *task;
-    struct dentry *dentry;
-    task = (struct task_struct *)bpf_get_current_task_btf();
-    dentry = task->fs->pwd.dentry;
-    for (int i = 0; i < MAX_FD_ENTRIES; i++)
-    {
-        char name[BUF_SIZE] = "";
-        int name_len = bpf_probe_read_str(event->pathSegments[i], sizeof(event->pathSegments[i]), (void *)dentry->d_name.name);
-        if (name_len < 0)
-        {
-            break;
-        }
-
-        // Root directory
-        if (dentry == dentry->d_parent)
-        {
-            break;
-        }
-        dentry = dentry->d_parent;
-    }
 }
 
 // from /sys/kernel/debug/tracing/events/syscalls/sys_enter_openat/format

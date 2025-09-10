@@ -67,6 +67,7 @@ type fileSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type fileProgramSpecs struct {
 	TraceCreat   *ebpf.ProgramSpec `ebpf:"trace_creat"`
+	TraceFstatat *ebpf.ProgramSpec `ebpf:"trace_fstatat"`
 	TraceLstat   *ebpf.ProgramSpec `ebpf:"trace_lstat"`
 	TraceOpen    *ebpf.ProgramSpec `ebpf:"trace_open"`
 	TraceOpenat  *ebpf.ProgramSpec `ebpf:"trace_openat"`
@@ -114,6 +115,7 @@ func (m *fileMaps) Close() error {
 // It can be passed to loadFileObjects or ebpf.CollectionSpec.LoadAndAssign.
 type filePrograms struct {
 	TraceCreat   *ebpf.Program `ebpf:"trace_creat"`
+	TraceFstatat *ebpf.Program `ebpf:"trace_fstatat"`
 	TraceLstat   *ebpf.Program `ebpf:"trace_lstat"`
 	TraceOpen    *ebpf.Program `ebpf:"trace_open"`
 	TraceOpenat  *ebpf.Program `ebpf:"trace_openat"`
@@ -124,6 +126,7 @@ type filePrograms struct {
 func (p *filePrograms) Close() error {
 	return _FileClose(
 		p.TraceCreat,
+		p.TraceFstatat,
 		p.TraceLstat,
 		p.TraceOpen,
 		p.TraceOpenat,

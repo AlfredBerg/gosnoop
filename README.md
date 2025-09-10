@@ -2,22 +2,24 @@
 <div align="center"><img src="assets/gopher.webp" width="200"/></div>
 
 # GoSnoop
-Inspect syscalls system wide for program executions and files being read or written, as well as if files exist.  
+Inspect syscalls system wide for program executions, and file operations (exec, stat, open and create family of syscalls).  
 The program also logs outgoing DNS requests.
 
-This is achived by using eBPF.
+All of this is achived by using eBPF.
 
-# Examples
+# Example
+
+<img src="assets/example.png"/>
 
 # Install:
 Requires Linux kernel version 5.7 or later, as well as root permissions (to be able to run eBPF programs)
 
-
+Either follow the build instructions, or use the prebuilt binary.
 
 
 # TODO:
 * Build terminal UI to inspect captured data
-* Implement newfstatat syscall
+* Add non path arguments for newfstatat syscall
 * Support dns over TCP
 
 
