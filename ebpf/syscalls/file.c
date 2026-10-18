@@ -2,7 +2,6 @@
 
 #include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
-#include <string.h>
 
 #include "utils/process-utils.h"
 
@@ -41,7 +40,6 @@ static __always_inline void walkFD(struct event *event)
     dentry = task->fs->pwd.dentry;
     for (int i = 0; i < MAX_FD_ENTRIES; i++)
     {
-        char name[BUF_SIZE] = "";
         int name_len = bpf_probe_read_str(event->pathSegments[i], sizeof(event->pathSegments[i]), (void *)dentry->d_name.name);
         if (name_len < 0)
         {
@@ -89,7 +87,7 @@ int trace_stat(struct stat_ctx *ctx)
     bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
 
     const char syscall[] = "stat";
-    memcpy(&event->sysCall, syscall, sizeof(syscall));
+    __builtin_memcpy(&event->sysCall, syscall, sizeof(syscall));
 
     collectProcessInfo(&event->processInfo);
 
@@ -135,7 +133,7 @@ int trace_fstatat(struct fstatat_ctx *ctx)
     }
 
     const char syscall[] = "fstatat";
-    memcpy(&event->sysCall, syscall, sizeof(syscall));
+    __builtin_memcpy(&event->sysCall, syscall, sizeof(syscall));
 
     collectProcessInfo(&event->processInfo);
 
@@ -172,7 +170,7 @@ int trace_lstat(struct lstat_ctx *ctx)
     bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
 
     const char syscall[] = "lstat";
-    memcpy(&event->sysCall, syscall, sizeof(syscall));
+    __builtin_memcpy(&event->sysCall, syscall, sizeof(syscall));
 
     collectProcessInfo(&event->processInfo);
 
@@ -212,7 +210,7 @@ int trace_open(struct open_ctx *ctx)
     bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->filename);
 
     const char syscall[] = "open";
-    memcpy(&event->sysCall, syscall, sizeof(syscall));
+    __builtin_memcpy(&event->sysCall, syscall, sizeof(syscall));
 
     collectProcessInfo(&event->processInfo);
 
@@ -251,7 +249,7 @@ int trace_creat(struct creat_ctx *ctx)
     bpf_probe_read_user_str(&event->path, sizeof(event->path), (void *)ctx->pathname);
 
     const char syscall[] = "creat";
-    memcpy(&event->sysCall, syscall, sizeof(syscall));
+    __builtin_memcpy(&event->sysCall, syscall, sizeof(syscall));
 
     collectProcessInfo(&event->processInfo);
 
@@ -298,7 +296,7 @@ int trace_openat(struct openat_ctx *ctx)
     }
 
     const char syscall[] = "openat";
-    memcpy(&event->sysCall, syscall, sizeof(syscall));
+    __builtin_memcpy(&event->sysCall, syscall, sizeof(syscall));
 
     collectProcessInfo(&event->processInfo);
 
@@ -345,7 +343,7 @@ int trace_openat2(struct openat2_ctx *ctx)
     }
 
     const char syscall[] = "openat2";
-    memcpy(&event->sysCall, syscall, sizeof(syscall));
+    __builtin_memcpy(&event->sysCall, syscall, sizeof(syscall));
 
     collectProcessInfo(&event->processInfo);
 

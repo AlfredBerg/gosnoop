@@ -1,7 +1,9 @@
+#ifndef __GOSNOOP_PROCESS_UTILS_H__
+#define __GOSNOOP_PROCESS_UTILS_H__
+
 #include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
-#include <string.h>
 
 #define PROCESS_INFO_BUF_SIZE 256
 #define COMM_SIZE 64
@@ -54,3 +56,5 @@ static __always_inline void collectProcessInfo(struct processInfo *p)
         bpf_probe_read_str(p->scomm[i], sizeof(p->scomm[i]), pcomm);
     }
 }
+
+#endif /* __GOSNOOP_PROCESS_UTILS_H__ */
