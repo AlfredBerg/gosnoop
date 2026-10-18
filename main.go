@@ -18,6 +18,7 @@ import (
 	"gosnoop/internal/ebpf/dns"
 	"gosnoop/internal/ebpf/exec"
 	"gosnoop/internal/ebpf/file"
+	"gosnoop/internal/ebpf/network"
 	"gosnoop/internal/event"
 	"gosnoop/internal/filter"
 	"gosnoop/internal/support"
@@ -41,7 +42,7 @@ type eventCollector interface {
 }
 
 // collectorNames lists every collector, in the order they are started.
-var collectorNames = []string{"exec", "file", "dns"}
+var collectorNames = []string{"exec", "file", "dns", "network"}
 
 func newCollector(name string, opts options) eventCollector {
 	switch name {
@@ -51,6 +52,8 @@ func newCollector(name string, opts options) eventCollector {
 		return &file.File{}
 	case "dns":
 		return &dns.Dns{}
+	case "network":
+		return &network.Network{}
 	}
 	return nil
 }
@@ -223,7 +226,7 @@ func parseFlags() (options, error) {
 
 func usage() {
 	out := flag.CommandLine.Output()
-	fmt.Fprintf(out, `gosnoop %s - trace process execution, file access and DNS lookups with eBPF.
+	fmt.Fprintf(out, `gosnoop %s - trace process execution, file access, DNS lookups and network connections with eBPF.
 
 Requires root (or CAP_BPF, CAP_PERFMON and CAP_SYS_RESOURCE) and a kernel built
 with BTF. Events are written to stdout as one JSON object per line.
@@ -238,6 +241,7 @@ Flags:
 Examples:
   gosnoop                                  trace everything
   gosnoop -collectors dns                  only trace DNS lookups
+  gosnoop -collectors network -comm curl   see who curl connects to
   gosnoop -collectors exec,file -comm curl trace what curl runs and opens
   gosnoop -pid-tree 4242                   trace pid 4242 and its descendants
 `)
