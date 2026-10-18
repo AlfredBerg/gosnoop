@@ -69,7 +69,7 @@ still decodes the question). Expect the occasional `systemd-resolved` or
 
 ## Domain names
 
-An IP address alone says little, so outbound connections carry `remote.domain`
+Outbound connections carry `remote.domain`
 when the address came out of a DNS lookup. GoSnoop watches DNS answers as the
 process that asked receives them (a `udp_recvmsg` / `udpv6_recvmsg` kretprobe on
 datagrams from port 53), remembers which name resolved to which address, and
@@ -78,15 +78,6 @@ looks the remote address up when it reports a connection.
 ```sh
 sudo ./gosnoop -collectors network | jq -c 'select(.data.remote.domain) | [.process.comm, .data.remote.domain, .data.remote.port]'
 ```
-
-* It works behind a local stub resolver such as `systemd-resolved`
-  (`127.0.0.53`), because the answer is picked up on the application's side, not
-  just the resolver's.
-* The name is the one the application **asked for**, not the end of a CNAME
-  chain: `www.example.com`, not `edge.cdn.example.net`.
-* It needs no `dns` collector. Asking for `network` starts the answer watcher on
-  its own; if it cannot be attached GoSnoop warns that connections will have no
-  `remote.domain` and carries on.
 * Everything is by address, system wide. When several names point at one address
   (a CDN edge, shared hosting) the **most recently looked up** name wins, so the
   label is a strong hint rather than proof. Only a lookup GoSnoop saw can be
@@ -96,29 +87,9 @@ sudo ./gosnoop -collectors network | jq -c 'select(.data.remote.domain) | [.proc
 * Answers are kept for their TTL, but at least 5 minutes and at most an hour,
   because applications keep connecting to an address long after its TTL ran out.
   At most 65,536 addresses are remembered.
-* Network events are held back for 20 ms before the lookup, so that the answer
-  and the connection that follows it, which arrive through different buffers,
-  cannot be handled in the wrong order. Event order is preserved.
 * `inbound` events never get a domain: a client address that happens to match a
   name we looked up is more likely a coincidence than a hostname.
 
-## What was left out, and why
-
-Before settling on these fields the hooks were checked for what else they could
-give cheaply. Included because they cost one field read: `uid`, `netns`,
-`connected`, and `scope` (computed in userspace). Evaluated and left out:
-
-| Idea | Verdict |
-| --- | --- |
-| Socket cookie, to correlate with other tooling | **Not possible.** `bpf_get_socket_cookie` and `bpf_get_netns_cookie` cannot be called from kprobe or tracepoint programs (checked on 7.2.11). The socket pointer is not a stable identity, and exposing a kernel address is a leak. |
-| Connect failures (errno) and connect latency | **Follow-up.** The SYN-sent hook runs before the outcome is known. Needs a second hook on the state change to `ESTABLISHED`/`CLOSE`, which runs in softirq context, so the process would have to be remembered per socket in a map. |
-| Connection duration, bytes, packets, retransmits | **Follow-up.** Same mechanism: a `close` event carrying the totals from `tcp_sock`, joined to the connect event by socket. Worth doing as its own event type rather than stretching this one. |
-| UDP bytes per datagram | **Rejected.** Meaningless when only the first datagram of a flow is reported. Per-datagram reporting is a firehose (DNS alone) and belongs behind a flag. |
-| UDP receive side / inbound datagrams | **Follow-up.** `udp_recvmsg` is hot and would need the same flow de-duplication. |
-| Resolved hostname for `remote.ip` | **Done**, as `remote.domain`; see [Domain names](#domain-names). Reverse DNS at report time was rejected: slow, wrong for CDNs, and it makes GoSnoop itself emit DNS. |
-| TLS server name (SNI) | **Rejected.** It means parsing the first bytes of every TCP send, is blind to ECH, and is the most privacy-sensitive thing on the list. |
-| Unix-domain sockets | **Follow-up.** Not IP, and a different hook (`unix_stream_connect`). Loopback IP traffic is already covered by `remote.scope`. |
-| `cgroup` | Observation: on this cgroup v2 host `process.cgroup` is empty for *every* collector, not only this one. It predates the network collector and is worth its own look. |
 
 # Requirements
 
