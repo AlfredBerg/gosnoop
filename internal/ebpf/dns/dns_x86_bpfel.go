@@ -8,12 +8,15 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"structs"
 
 	"github.com/cilium/ebpf"
 )
 
 type dnsEvent struct {
+	_           structs.HostLayout
 	ProcessInfo struct {
+		_      structs.HostLayout
 		Pid    uint32
 		Comm   [256]uint8
 		Cgroup [64]uint8
@@ -26,6 +29,15 @@ type dnsEvent struct {
 	PktData [512]uint8
 	_       [2]byte
 }
+
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	dnsMapRingBuffer       = "ring_buffer"
+	dnsProgUdpSendmsgProbe = "udp_sendmsg_probe"
+	dnsVarUnused           = "unused"
+)
 
 // loadDns returns the embedded CollectionSpec for dns.
 func loadDns() (*ebpf.CollectionSpec, error) {
@@ -47,7 +59,7 @@ func loadDns() (*ebpf.CollectionSpec, error) {
 //	*dnsMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadDnsObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadDnsObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadDns()
 	if err != nil {
 		return err
@@ -62,9 +74,10 @@ func loadDnsObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 type dnsSpecs struct {
 	dnsProgramSpecs
 	dnsMapSpecs
+	dnsVariableSpecs
 }
 
-// dnsSpecs contains programs before they are loaded into the kernel.
+// dnsProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type dnsProgramSpecs struct {
@@ -78,12 +91,20 @@ type dnsMapSpecs struct {
 	RingBuffer *ebpf.MapSpec `ebpf:"ring_buffer"`
 }
 
+// dnsVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type dnsVariableSpecs struct {
+	Unused *ebpf.VariableSpec `ebpf:"unused"`
+}
+
 // dnsObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadDnsObjects or ebpf.CollectionSpec.LoadAndAssign.
 type dnsObjects struct {
 	dnsPrograms
 	dnsMaps
+	dnsVariables
 }
 
 func (o *dnsObjects) Close() error {
@@ -104,6 +125,13 @@ func (m *dnsMaps) Close() error {
 	return _DnsClose(
 		m.RingBuffer,
 	)
+}
+
+// dnsVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadDnsObjects or ebpf.CollectionSpec.LoadAndAssign.
+type dnsVariables struct {
+	Unused *ebpf.Variable `ebpf:"unused"`
 }
 
 // dnsPrograms contains all programs after they have been loaded into the kernel.

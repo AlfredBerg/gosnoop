@@ -1,3 +1,3 @@
 package file
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -type event file ../../../ebpf/syscalls/file.c  -- -I./../../../vmlinux/ -I./../../../ebpf/
+//go:generate go tool bpf2go -type event file ../../../ebpf/syscalls/file.c -- -I./../../../vmlinux/ -I./../../../ebpf/
