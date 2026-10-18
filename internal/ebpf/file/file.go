@@ -6,12 +6,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"gosnoop/internal/event"
 	"log"
 	"slices"
 	"strings"
 	"sync"
 
+	"gosnoop/internal/event"
+
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 )
@@ -63,7 +65,9 @@ func convertFileEvent(e fileEvent) FileEvent {
 		}
 		slices.Reverse(pSegments)
 
-		d.Path = "/" + strings.Join(pSegments[1:], "/") + d.Path
+		if len(pSegments) > 1 {
+			d.Path = "/" + strings.Join(pSegments[1:], "/") + d.Path
+		}
 	}
 
 	ev.Type = "file"
@@ -71,82 +75,100 @@ func convertFileEvent(e fileEvent) FileEvent {
 	return ev
 }
 
-type File struct {
-	tps []link.Link
-	rb  *ringbuf.Reader
+// tracepoints maps the syscall tracepoints this collector traces to the program
+// that handles them. A kernel that is missing one of these still gets the rest.
+func (r *File) tracepoints() []struct {
+	name string
+	prog *ebpf.Program
+} {
+	return []struct {
+		name string
+		prog *ebpf.Program
+	}{
+		{"sys_enter_newstat", r.objs.TraceStat},
+		{"sys_enter_newfstatat", r.objs.TraceFstatat},
+		{"sys_enter_newlstat", r.objs.TraceLstat},
+		{"sys_enter_open", r.objs.TraceOpen},
+		{"sys_enter_openat", r.objs.TraceOpenat},
+		{"sys_enter_openat2", r.objs.TraceOpenat2},
+		{"sys_enter_creat", r.objs.TraceCreat},
+	}
 }
 
-func (r *File) Close() {
+type File struct {
+	objs fileObjects
+	tps  []link.Link
+	rb   *ringbuf.Reader
+}
+
+func (r *File) Name() string {
+	return "file"
+}
+
+// Close releases everything ReceiveEvents managed to set up. It is safe to call
+// on a collector that never started, or that only started partially.
+func (r *File) Close() error {
+	var errs []error
+
+	if r.rb != nil {
+		if err := r.rb.Close(); err != nil && !errors.Is(err, ringbuf.ErrClosed) {
+			errs = append(errs, fmt.Errorf("closing ringbuf reader: %w", err))
+		}
+		r.rb = nil
+	}
 	for _, tp := range r.tps {
 		if err := tp.Close(); err != nil {
-			log.Fatalf("failed closing tracepoint: %s", err)
+			errs = append(errs, fmt.Errorf("closing tracepoint: %w", err))
 		}
 	}
-
-	if err := r.rb.Close(); err != nil {
-		log.Fatalf("failed closing ringbuf reader: %s", err)
+	r.tps = nil
+	if err := r.objs.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("closing eBPF objects: %w", err))
 	}
+
+	return errors.Join(errs...)
 }
 
-func (r *File) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- interface{}) error {
+func (r *File) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- event.Event) (err error) {
+	defer func() {
+		if err != nil {
+			r.Close()
+		}
+	}()
+
 	// Load the compiled eBPF ELF and load it into the kernel.
-	var objs fileObjects
-	if err := loadFileObjects(&objs, nil); err != nil {
-		log.Fatal("Loading eBPF objects:", err)
+	if err = loadFileObjects(&r.objs, nil); err != nil {
+		return fmt.Errorf("loading eBPF objects: %w", err)
 	}
-	defer objs.Close()
 
-	tp, err := link.Tracepoint("syscalls", "sys_enter_newstat", objs.TraceStat, nil)
-	if err != nil {
-		return fmt.Errorf("failed attatching tracepoint: %w", err)
+	// Not every kernel exposes every one of these syscalls — arm64, for
+	// instance, has no sys_enter_open or sys_enter_newstat. Trace what is there
+	// and only give up if nothing attached at all.
+	var skipped []string
+	for _, tp := range r.tracepoints() {
+		l, attachErr := link.Tracepoint("syscalls", tp.name, tp.prog, nil)
+		if attachErr != nil {
+			skipped = append(skipped, tp.name)
+			continue
+		}
+		r.tps = append(r.tps, l)
 	}
-	r.tps = append(r.tps, tp)
-
-	tp, err = link.Tracepoint("syscalls", "sys_enter_newfstatat", objs.TraceFstatat, nil)
-	if err != nil {
-		return fmt.Errorf("failed attatching tracepoint: %w", err)
+	if len(skipped) > 0 {
+		log.Printf("file: not tracing %s, this kernel does not expose those tracepoints", strings.Join(skipped, ", "))
 	}
-	r.tps = append(r.tps, tp)
-
-	tp, err = link.Tracepoint("syscalls", "sys_enter_newlstat", objs.TraceLstat, nil)
-	if err != nil {
-		return fmt.Errorf("failed attatching tracepoint: %w", err)
+	if len(r.tps) == 0 {
+		return errors.New("attaching tracepoints: none of the file syscall tracepoints could be attached")
 	}
-	r.tps = append(r.tps, tp)
 
-	tp, err = link.Tracepoint("syscalls", "sys_enter_open", objs.TraceOpen, nil)
+	r.rb, err = ringbuf.NewReader(r.objs.RingBuffer)
 	if err != nil {
-		return fmt.Errorf("failed attatching tracepoint: %w", err)
-	}
-	r.tps = append(r.tps, tp)
-
-	tp, err = link.Tracepoint("syscalls", "sys_enter_openat", objs.TraceOpenat, nil)
-	if err != nil {
-		return fmt.Errorf("failed attatching tracepoint: %w", err)
-	}
-	r.tps = append(r.tps, tp)
-
-	tp, err = link.Tracepoint("syscalls", "sys_enter_openat2", objs.TraceOpenat2, nil)
-	if err != nil {
-		return fmt.Errorf("failed attatching tracepoint: %w", err)
-	}
-	r.tps = append(r.tps, tp)
-
-	tp, err = link.Tracepoint("syscalls", "sys_enter_creat", objs.TraceCreat, nil)
-	if err != nil {
-		return fmt.Errorf("failed attatching tracepoint: %w", err)
-	}
-	r.tps = append(r.tps, tp)
-
-	r.rb, err = ringbuf.NewReader(objs.RingBuffer)
-	if err != nil {
-		return fmt.Errorf("failed opening ringbuf reader: %s", err)
+		return fmt.Errorf("opening ringbuf reader: %w", err)
 	}
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		var event fileEvent
+		var record fileEvent
 
 		go func() {
 			<-ctx.Done()
@@ -159,22 +181,25 @@ func (r *File) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- i
 				return
 
 			default:
-				record, err := r.rb.Read()
+				raw, err := r.rb.Read()
 				if err != nil {
 					if errors.Is(err, ringbuf.ErrClosed) {
-						log.Println("rungbuffer closed, exiting..")
 						return
 					}
-					log.Printf("error reading from reader: %s", err)
+					log.Printf("file: error reading from ringbuf: %s", err)
 					continue
 				}
 
-				if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
-					log.Printf("error parsing ringbuf event: %s", err)
+				if err := binary.Read(bytes.NewBuffer(raw.RawSample), binary.NativeEndian, &record); err != nil {
+					log.Printf("file: error parsing ringbuf event: %s", err)
 					continue
 				}
 
-				c <- convertFileEvent(event)
+				select {
+				case c <- convertFileEvent(record):
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()

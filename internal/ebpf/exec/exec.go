@@ -6,10 +6,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"gosnoop/internal/event"
 	"log"
 	"strings"
 	"sync"
+
+	"gosnoop/internal/event"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -76,35 +77,60 @@ func convertExecEvent(e execEvent) ExecEvent {
 
 type Exec struct {
 	IncludeEnvp bool
-	tp          link.Link
-	rb          *ringbuf.Reader
+
+	objs execObjects
+	tp   link.Link
+	rb   *ringbuf.Reader
 }
 
-func (r *Exec) Close() {
-	if err := r.tp.Close(); err != nil {
-		log.Fatalf("failed closing tracepoint: %s", err)
-	}
-
-	if err := r.rb.Close(); err != nil {
-		log.Fatalf("failed closing ringbuf reader: %s", err)
-	}
+func (r *Exec) Name() string {
+	return "exec"
 }
 
-func (r *Exec) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- interface{}) error {
+// Close releases everything ReceiveEvents managed to set up. It is safe to call
+// on a collector that never started, or that only started partially.
+func (r *Exec) Close() error {
+	var errs []error
+
+	if r.rb != nil {
+		if err := r.rb.Close(); err != nil && !errors.Is(err, ringbuf.ErrClosed) {
+			errs = append(errs, fmt.Errorf("closing ringbuf reader: %w", err))
+		}
+		r.rb = nil
+	}
+	if r.tp != nil {
+		if err := r.tp.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("closing tracepoint: %w", err))
+		}
+		r.tp = nil
+	}
+	if err := r.objs.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("closing eBPF objects: %w", err))
+	}
+
+	return errors.Join(errs...)
+}
+
+func (r *Exec) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- event.Event) (err error) {
+	// Anything already set up has to go back if we bail out half way, otherwise
+	// a collector that main decided to skip would keep its probes attached.
+	defer func() {
+		if err != nil {
+			r.Close()
+		}
+	}()
+
 	// Load the compiled eBPF ELF and load it into the kernel.
-	var objs execObjects
-	if err := loadExecObjects(&objs, nil); err != nil {
-		log.Fatal("Loading eBPF objects:", err)
+	if err = loadExecObjects(&r.objs, nil); err != nil {
+		return fmt.Errorf("loading eBPF objects: %w", err)
 	}
-	defer objs.Close()
 
-	tp, err := link.Tracepoint("syscalls", "sys_enter_execve", objs.TraceExecve, nil)
-	r.tp = tp
+	r.tp, err = link.Tracepoint("syscalls", "sys_enter_execve", r.objs.TraceExecve, nil)
 	if err != nil {
-		return fmt.Errorf("attatching tracepoint: %w", err)
+		return fmt.Errorf("attaching tracepoint syscalls/sys_enter_execve: %w", err)
 	}
 
-	r.rb, err = ringbuf.NewReader(objs.RingBuffer)
+	r.rb, err = ringbuf.NewReader(r.objs.RingBuffer)
 	if err != nil {
 		return fmt.Errorf("opening ringbuf reader: %w", err)
 	}
@@ -112,7 +138,7 @@ func (r *Exec) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- i
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		var event execEvent
+		var record execEvent
 
 		go func() {
 			<-ctx.Done()
@@ -125,25 +151,29 @@ func (r *Exec) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<- i
 				return
 
 			default:
-				record, err := r.rb.Read()
+				raw, err := r.rb.Read()
 				if err != nil {
 					if errors.Is(err, ringbuf.ErrClosed) {
-						log.Println("rungbuffer closed, exiting..")
 						return
 					}
-					log.Printf("error reading from reader: %s", err)
+					log.Printf("exec: error reading from ringbuf: %s", err)
 					continue
 				}
 
-				if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
-					log.Printf("error parsing ringbuf event: %s", err)
+				if err := binary.Read(bytes.NewBuffer(raw.RawSample), binary.NativeEndian, &record); err != nil {
+					log.Printf("exec: error parsing ringbuf event: %s", err)
 					continue
 				}
-				execEvent := convertExecEvent(event)
+				execEvent := convertExecEvent(record)
 				if !r.IncludeEnvp {
-					execEvent.Data.Envp = []string{}
+					execEvent.Data.Envp = nil
 				}
-				c <- execEvent
+
+				select {
+				case c <- execEvent:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()
