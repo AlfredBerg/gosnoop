@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: generate, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install the eBPF toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev
+
+      - name: Regenerate the eBPF objects and bindings
+        run: make generate
+
+      - name: Vet and test
+        run: make vet test
+
+      - name: Build for every supported architecture
+        run: make build-all
+
+      - name: Build for the host
+        run: make build
+
+      # The bug this CI exists to catch is "it compiles but will not load", so
+      # actually load the probes against the runner's kernel and check that
+      # events come out.
+      - name: Smoke test against the runner's kernel
+        run: |
+          uname -r
+          ( sleep 3; ls -R /usr/share/doc >/dev/null 2>&1; getent hosts example.com >/dev/null 2>&1 ) &
+          sudo timeout -s INT 10 ./gosnoop > events.jsonl 2> gosnoop.log || true
+          echo "--- gosnoop stderr ---"
+          cat gosnoop.log
+          echo "--- first events ---"
+          head -n 3 events.jsonl || true
+          if [ ! -s events.jsonl ]; then
+            echo "::error::gosnoop loaded but produced no events"
+            exit 1
+          fi
+          if grep -q "is disabled" gosnoop.log; then
+            echo "::warning::some collectors were disabled on this kernel"
+          fi
