@@ -23,8 +23,6 @@ type dnsEvent struct {
 		Spid   [15]uint32
 		Scomm  [15][64]uint8
 	}
-	Pid     uint32
-	Comm    [64]uint8
 	PktLen  uint16
 	PktData [512]uint8
 	_       [2]byte

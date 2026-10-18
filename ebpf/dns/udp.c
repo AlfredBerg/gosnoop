@@ -3,11 +3,15 @@
 // Originally from https://github.com/whoopscs/dnsflux/blob/1870de1d70049f97849acc184a24c0f29f925e5a/platform/bpf/dnsfilter.c but adapted. Note the GPL license
 
 #include <vmlinux.h>
+
+#include "utils/arch-compat.h" // must precede bpf_tracing.h
+
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
+#include "utils/iov-compat.h"
 #include "utils/process-utils.h"
 
 #define DNS_PORT 53
@@ -18,8 +22,6 @@
 struct event
 {
     struct processInfo processInfo;
-    __u32 pid;
-    __u8 comm[64];
 
     __u16 pkt_len;
     __u8 pkt_data[PAYLOAD_MAX];
@@ -40,8 +42,7 @@ static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_
     if (!sk)
         return;
 
-    __u16 sport, dport;
-    BPF_CORE_READ_INTO(&sport, sk, __sk_common.skc_num);
+    __u16 dport;
     BPF_CORE_READ_INTO(&dport, sk, __sk_common.skc_dport);
 
     if (bpf_ntohs(dport) != DNS_PORT)
@@ -50,25 +51,14 @@ static __always_inline void handleDns(struct sock *sk, struct msghdr *msg, size_
     struct event *event = bpf_ringbuf_reserve(&ring_buffer, sizeof(*event), 0);
     if (!event)
         return;
-    
-    if (msg)
-    {
-        struct iovec *iov;
-        BPF_CORE_READ_INTO(&iov, msg, msg_iter.iov);
-        if (iov)
-        {
-            void *base;
-            size_t len;
-            BPF_CORE_READ_INTO(&base, iov, iov_base);
-            BPF_CORE_READ_INTO(&len, iov, iov_len);
 
-            if (base && len <= sizeof(event->pkt_data))
-            {
-                bpf_probe_read_user(event->pkt_data, len, base);
-                event->pkt_len = len;
-            }
-        }
+    // Zero out the struct as there might be some data from the previous use of the ring buffer
+    for (int i = 0; i < sizeof(struct event); i++)
+    {
+        ((volatile char *)event)[i] = 0;
     }
+
+    event->pkt_len = readMsgPayload(msg, event->pkt_data, sizeof(event->pkt_data));
 
     collectProcessInfo(&event->processInfo);
 
