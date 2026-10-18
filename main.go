@@ -15,7 +15,9 @@ import (
 	"sync"
 	"syscall"
 
+	"gosnoop/internal/dnscache"
 	"gosnoop/internal/ebpf/dns"
+	"gosnoop/internal/ebpf/dnsanswer"
 	"gosnoop/internal/ebpf/exec"
 	"gosnoop/internal/ebpf/file"
 	"gosnoop/internal/ebpf/network"
@@ -44,7 +46,7 @@ type eventCollector interface {
 // collectorNames lists every collector, in the order they are started.
 var collectorNames = []string{"exec", "file", "dns", "network"}
 
-func newCollector(name string, opts options) eventCollector {
+func newCollector(name string, opts options, domains *dnscache.Cache) eventCollector {
 	switch name {
 	case "exec":
 		return &exec.Exec{IncludeEnvp: opts.includeEnvp}
@@ -53,7 +55,7 @@ func newCollector(name string, opts options) eventCollector {
 	case "dns":
 		return &dns.Dns{}
 	case "network":
-		return &network.Network{}
+		return &network.Network{Resolver: domains}
 	}
 	return nil
 }
@@ -104,8 +106,27 @@ func run() error {
 	started := make([]eventCollector, 0, len(opts.collectors))
 	var failures []error
 
+	// The network collector labels connections with the domain they were looked
+	// up as, which takes watching DNS answers. That is a helper rather than a
+	// collector of its own: it reports nothing, and losing it only costs the
+	// labels, so it neither counts as a failure nor stops the network collector.
+	var domains *dnscache.Cache
+	if slices.Contains(opts.collectors, "network") {
+		domains = dnscache.New()
+		answers := &dnsanswer.Answers{Cache: domains}
+		if err := answers.ReceiveEvents(ctx, &wg, events); err != nil {
+			log.Printf("warning: network events will have no remote.domain, DNS answers cannot be watched: %s", support.Describe(err))
+		} else {
+			defer func() {
+				if err := answers.Close(); err != nil {
+					log.Printf("warning: %s: %s", answers.Name(), err)
+				}
+			}()
+		}
+	}
+
 	for _, name := range opts.collectors {
-		c := newCollector(name, opts)
+		c := newCollector(name, opts, domains)
 		if err := c.ReceiveEvents(ctx, &wg, events); err != nil {
 			failures = append(failures, fmt.Errorf("%s collector: %w", name, err))
 			log.Printf("warning: the %s collector is disabled: %s", name, support.Describe(err))

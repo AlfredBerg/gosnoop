@@ -147,3 +147,38 @@ func mustAddr(t *testing.T, s string) netip.Addr {
 	}
 	return a
 }
+
+type fakeResolver map[netip.Addr]string
+
+func (f fakeResolver) Lookup(a netip.Addr) (string, bool) {
+	n, ok := f[a]
+	return n, ok
+}
+
+func TestLabelOnlyOutboundWithAKnownName(t *testing.T) {
+	ip := netip.MustParseAddr("93.184.216.34")
+	n := &Network{Resolver: fakeResolver{ip: "example.com"}}
+
+	for _, tc := range []struct {
+		dir  uint8
+		addr []byte
+		want string
+	}{
+		{dirOutbound, ip.AsSlice(), "example.com"},
+		{dirOutbound, []byte{10, 0, 0, 1}, ""},
+		{dirInbound, ip.AsSlice(), ""},
+	} {
+		ev, _ := convertNetworkEvent(sample(afInet, ipprotoTCP, tc.dir, []byte{192, 168, 1, 5}, tc.addr, 1, 443))
+		n.label(&ev)
+		if ev.Data.Remote.Domain != tc.want {
+			t.Errorf("dir %d to %v: domain = %q, want %q", tc.dir, tc.addr, ev.Data.Remote.Domain, tc.want)
+		}
+	}
+
+	// No resolver at all must not panic.
+	ev, _ := convertNetworkEvent(sample(afInet, ipprotoTCP, dirOutbound, nil, ip.AsSlice(), 1, 443))
+	(&Network{}).label(&ev)
+	if ev.Data.Remote.Domain != "" {
+		t.Error("labelled without a resolver")
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"time"
 
 	"gosnoop/internal/event"
 
@@ -35,6 +36,9 @@ type endpoint struct {
 	// Scope classifies the address: loopback, private, link-local, multicast,
 	// unspecified or public.
 	Scope string `json:"scope,omitempty"`
+	// Domain is the name the remote address was last looked up as. It is only
+	// set for outbound connections whose address a DNS answer was seen for.
+	Domain string `json:"domain,omitempty"`
 }
 
 type networkData struct {
@@ -163,10 +167,66 @@ func convertNetworkEvent(e networkEvent) (NetworkEvent, bool) {
 	return ev, true
 }
 
+// Resolver maps an address to the name it was looked up as.
+type Resolver interface {
+	Lookup(addr netip.Addr) (name string, ok bool)
+}
+
+// resolveDelay is how long an event waits before its address is looked up.
+// The DNS answer and the connection that follows it arrive through different
+// ring buffers read by different goroutines, so without a wait the connection
+// can be handled first and miss the name it was made for. Every event waits the
+// same time, which keeps them in the order they happened.
+const resolveDelay = 20 * time.Millisecond
+
 type Network struct {
+	// Resolver, when set, labels outbound connections with the domain their
+	// remote address was looked up as.
+	Resolver Resolver
+
 	objs  networkObjects
 	links []link.Link
 	rb    *ringbuf.Reader
+}
+
+type pendingEvent struct {
+	ev   NetworkEvent
+	seen time.Time
+}
+
+// label sets the remote domain if the address was resolved by name. Inbound
+// connections are left alone: a client's address matching a name we once looked
+// up is more likely a coincidence than a hostname.
+func (r *Network) label(ev *NetworkEvent) {
+	if r.Resolver == nil || ev.Data.Direction != "outbound" {
+		return
+	}
+	if addr, err := netip.ParseAddr(ev.Data.Remote.IP); err == nil {
+		if name, ok := r.Resolver.Lookup(addr); ok {
+			ev.Data.Remote.Domain = name
+		}
+	}
+}
+
+// emit labels events and sends them on, resolveDelay after they were read.
+func (r *Network) emit(ctx context.Context, wg *sync.WaitGroup, c chan<- event.Event, pending <-chan pendingEvent) {
+	defer wg.Done()
+	for p := range pending {
+		if wait := resolveDelay - time.Since(p.seen); wait > 0 {
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return
+			}
+		}
+		r.label(&p.ev)
+
+		select {
+		case c <- p.ev:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func (r *Network) Name() string {
@@ -262,9 +322,21 @@ func (r *Network) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<
 		return fmt.Errorf("opening ringbuf reader: %w", err)
 	}
 
+	// Without a resolver there is nothing to wait for.
+	out := c
+	var pending chan pendingEvent
+	if r.Resolver != nil {
+		pending = make(chan pendingEvent, 1024)
+		wg.Add(1)
+		go r.emit(ctx, wg, c, pending)
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		if pending != nil {
+			defer close(pending)
+		}
 		var record networkEvent
 
 		go func() {
@@ -298,8 +370,17 @@ func (r *Network) ReceiveEvents(ctx context.Context, wg *sync.WaitGroup, c chan<
 					continue
 				}
 
+				if pending != nil {
+					select {
+					case pending <- pendingEvent{ev, time.Now()}:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+
 				select {
-				case c <- ev:
+				case out <- ev:
 				case <-ctx.Done():
 					return
 				}

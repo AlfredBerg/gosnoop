@@ -56,6 +56,9 @@ jobs:
             echo "::error::the network collector started but reported nothing for a connection attempt to 127.0.0.1:9"
             exit 1
           fi
+          if grep -q "will have no remote.domain" gosnoop.log; then
+            echo "::warning::DNS answers cannot be watched on this kernel, network events get no remote.domain"
+          fi
           if grep -q "is disabled" gosnoop.log; then
             echo "::warning::some collectors were disabled on this kernel"
           fi

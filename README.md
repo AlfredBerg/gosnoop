@@ -26,7 +26,7 @@ to stdout as one JSON object per line.
     "protocol": "tcp",
     "direction": "outbound",
     "family": "ipv4",
-    "remote": { "ip": "104.20.23.154", "port": 443, "scope": "public" },
+    "remote": { "ip": "104.20.23.154", "port": 443, "scope": "public", "domain": "example.com" },
     "local": { "ip": "10.0.2.15", "port": 43802 },
     "uid": 1000,
     "netns": 4026531833
@@ -43,6 +43,7 @@ to stdout as one JSON object per line.
 | `family` | `ipv4` or `ipv6`, as seen on the wire: an `AF_INET6` socket talking to an IPv4-mapped address (`::ffff:a.b.c.d`) is reported as `ipv4` with the plain IPv4 address |
 | `remote.ip`, `remote.port` | the other end |
 | `remote.scope` | `loopback`, `private`, `link-local`, `multicast`, `unspecified` or `public`, so `-collectors network` output can be cut down to "leaves this machine" with `jq 'select(.data.remote.scope == "public")'` |
+| `remote.domain` | the name `remote.ip` was last looked up as, when GoSnoop saw a DNS answer for it; left out otherwise. Only set for `outbound` events. See [Domain names](#domain-names) |
 | `local.ip`, `local.port` | this end. `local.ip` is left out when the kernel has not picked a source address yet, which happens for an unbound UDP socket |
 | `connected` | UDP only. `true` if the socket was `connect()`ed and the datagram went to that peer, `false` if the send named its own destination (`sendto`) |
 | `uid` | the uid of the process, which is not the same thing as the user who started it if it called `setuid` |
@@ -66,6 +67,41 @@ DNS queries also show up here as UDP flows to port 53 (and the `dns` collector
 still decodes the question). Expect the occasional `systemd-resolved` or
 `chronyd` event: those are real traffic from real processes.
 
+## Domain names
+
+An IP address alone says little, so outbound connections carry `remote.domain`
+when the address came out of a DNS lookup. GoSnoop watches DNS answers as the
+process that asked receives them (a `udp_recvmsg` / `udpv6_recvmsg` kretprobe on
+datagrams from port 53), remembers which name resolved to which address, and
+looks the remote address up when it reports a connection.
+
+```sh
+sudo ./gosnoop -collectors network | jq -c 'select(.data.remote.domain) | [.process.comm, .data.remote.domain, .data.remote.port]'
+```
+
+* It works behind a local stub resolver such as `systemd-resolved`
+  (`127.0.0.53`), because the answer is picked up on the application's side, not
+  just the resolver's.
+* The name is the one the application **asked for**, not the end of a CNAME
+  chain: `www.example.com`, not `edge.cdn.example.net`.
+* It needs no `dns` collector. Asking for `network` starts the answer watcher on
+  its own; if it cannot be attached GoSnoop warns that connections will have no
+  `remote.domain` and carries on.
+* Everything is by address, system wide. When several names point at one address
+  (a CDN edge, shared hosting) the **most recently looked up** name wins, so the
+  label is a strong hint rather than proof. Only a lookup GoSnoop saw can be
+  matched: a connection to a literal IP, an address from `/etc/hosts`, a cached
+  answer from before GoSnoop started, DNS over TCP, DoH and DoT all come out
+  without a domain.
+* Answers are kept for their TTL, but at least 5 minutes and at most an hour,
+  because applications keep connecting to an address long after its TTL ran out.
+  At most 65,536 addresses are remembered.
+* Network events are held back for 20 ms before the lookup, so that the answer
+  and the connection that follows it, which arrive through different buffers,
+  cannot be handled in the wrong order. Event order is preserved.
+* `inbound` events never get a domain: a client address that happens to match a
+  name we looked up is more likely a coincidence than a hostname.
+
 ## What was left out, and why
 
 Before settling on these fields the hooks were checked for what else they could
@@ -79,7 +115,7 @@ give cheaply. Included because they cost one field read: `uid`, `netns`,
 | Connection duration, bytes, packets, retransmits | **Follow-up.** Same mechanism: a `close` event carrying the totals from `tcp_sock`, joined to the connect event by socket. Worth doing as its own event type rather than stretching this one. |
 | UDP bytes per datagram | **Rejected.** Meaningless when only the first datagram of a flow is reported. Per-datagram reporting is a firehose (DNS alone) and belongs behind a flag. |
 | UDP receive side / inbound datagrams | **Follow-up.** `udp_recvmsg` is hot and would need the same flow de-duplication. |
-| Resolved hostname for `remote.ip` | **Follow-up.** The `dns` collector sees queries, not answers, so there is nothing to match against. It would need a receive-side hook and breaks behind a local stub resolver (`127.0.0.53`). Reverse DNS at report time was rejected: slow, wrong for CDNs, and it makes GoSnoop itself emit DNS. |
+| Resolved hostname for `remote.ip` | **Done**, as `remote.domain`; see [Domain names](#domain-names). Reverse DNS at report time was rejected: slow, wrong for CDNs, and it makes GoSnoop itself emit DNS. |
 | TLS server name (SNI) | **Rejected.** It means parsing the first bytes of every TCP send, is blind to ECH, and is the most privacy-sensitive thing on the list. |
 | Unix-domain sockets | **Follow-up.** Not IP, and a different hook (`unix_stream_connect`). Loopback IP traffic is already covered by `remote.scope`. |
 | `cgroup` | Observation: on this cgroup v2 host `process.cgroup` is empty for *every* collector, not only this one. It predates the network collector and is worth its own look. |
@@ -223,6 +259,13 @@ lacks one only loses that one: no `udpv6_sendmsg` (IPv6 compiled out) means no
 IPv6 UDP events. If `tcp_connect` cannot be probed GoSnoop falls back to a
 tracepoint, which still reports outgoing TCP but cannot know the local port
 yet, so `local.port` is `0` on those events.
+
+### `network events will have no remote.domain`
+
+The DNS answer watcher could not be attached (`udp_recvmsg` inlined, renamed or
+blacklisted, or the verifier said no). Connections are still reported, just
+without `remote.domain`. A line starting `dns-answers: not watching ...` means
+only one of IPv4 and IPv6 could be hooked.
 
 ### `file: not tracing sys_enter_open, sys_enter_newstat, ...`
 

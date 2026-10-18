@@ -39,20 +39,20 @@ struct msghdr___gosnoop
 };
 
 /*
- * Copy the first segment of `msg` into `dst` and return how many bytes landed
- * there, or 0 when the payload could not be reached. `dst_sz` must be a
- * compile-time constant so the verifier can bound the copy.
+ * Find the first segment of `msg`: its user address in `*base` and its length
+ * in `*len`. Returns false when there is none. Call this before the kernel
+ * consumes the iterator; afterwards the fields no longer describe the buffer.
  */
-static __always_inline __u16 readMsgPayload(struct msghdr *msg, __u8 *dst, __u32 dst_sz)
+static __always_inline bool getMsgFirstBuffer(struct msghdr *msg, void **base, __u64 *len)
 {
     struct msghdr___gosnoop *m = (struct msghdr___gosnoop *)msg;
     const struct iovec *iov = NULL;
-    void *base = NULL;
-    __u64 len = 0;
+    void *b = NULL;
+    __u64 l = 0;
     __u8 iterType = 0;
 
     if (!msg)
-        return 0;
+        return false;
 
     BPF_CORE_READ_INTO(&iterType, m, msg_iter.iter_type);
 
@@ -61,8 +61,8 @@ static __always_inline __u16 readMsgPayload(struct msghdr *msg, __u8 *dst, __u32
         /* 6.5 and later. ITER_UBUF is guaranteed to exist on these kernels. */
         if (iterType == bpf_core_enum_value(enum iter_type, ITER_UBUF))
         {
-            BPF_CORE_READ_INTO(&base, m, msg_iter.__ubuf_iovec.iov_base);
-            BPF_CORE_READ_INTO(&len, m, msg_iter.__ubuf_iovec.iov_len);
+            BPF_CORE_READ_INTO(&b, m, msg_iter.__ubuf_iovec.iov_base);
+            BPF_CORE_READ_INTO(&l, m, msg_iter.__ubuf_iovec.iov_len);
         }
         else
         {
@@ -75,8 +75,8 @@ static __always_inline __u16 readMsgPayload(struct msghdr *msg, __u8 *dst, __u32
         /* 6.0 - 6.4: `ubuf` is its own union member, the length is in `count`. */
         if (iterType == bpf_core_enum_value(enum iter_type, ITER_UBUF))
         {
-            BPF_CORE_READ_INTO(&base, m, msg_iter.ubuf);
-            BPF_CORE_READ_INTO(&len, m, msg_iter.count);
+            BPF_CORE_READ_INTO(&b, m, msg_iter.ubuf);
+            BPF_CORE_READ_INTO(&l, m, msg_iter.count);
         }
         else if (bpf_core_field_exists(struct iov_iter___gosnoop, __iov))
         {
@@ -95,11 +95,29 @@ static __always_inline __u16 readMsgPayload(struct msghdr *msg, __u8 *dst, __u32
 
     if (iov)
     {
-        base = BPF_CORE_READ(iov, iov_base);
-        len = BPF_CORE_READ(iov, iov_len);
+        b = BPF_CORE_READ(iov, iov_base);
+        l = BPF_CORE_READ(iov, iov_len);
     }
 
-    if (!base || len == 0 || len > dst_sz)
+    if (!b || l == 0)
+        return false;
+
+    *base = b;
+    *len = l;
+    return true;
+}
+
+/*
+ * Copy the first segment of `msg` into `dst` and return how many bytes landed
+ * there, or 0 when the payload could not be reached. `dst_sz` must be a
+ * compile-time constant so the verifier can bound the copy.
+ */
+static __always_inline __u16 readMsgPayload(struct msghdr *msg, __u8 *dst, __u32 dst_sz)
+{
+    void *base = NULL;
+    __u64 len = 0;
+
+    if (!getMsgFirstBuffer(msg, &base, &len) || len > dst_sz)
         return 0;
 
     if (bpf_probe_read_user(dst, len, base) != 0)
